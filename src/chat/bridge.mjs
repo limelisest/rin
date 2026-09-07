@@ -19,7 +19,12 @@ export class ChatBridge {
     this.store = store || new ChatStore(resolve(config.dataDir, 'chat.sqlite'));
     this.attention = config.attention?.nerveConfig ? new AttentionClient(config.attention.nerveConfig,this.store,{log}) : null;
     if(this.store.cursor('bindings')) this.config.bindings=this.store.cursor('bindings');
+    this.config.bindings=[...this.config.bindings];
+    for(const entry of Object.values(this.store.cursor('auto-bindings') || {})) {
+      if(entry.state==='bound' && !this.config.bindings.some(b=>this.routeKey(b)===this.routeKey(entry.binding))) this.config.bindings.push(entry.binding);
+    }
     validateConfig(this.config);
+    this.bindingCreations=new Map();
     this.codex = codex;
     this.codex.getCursor = key => this.store.cursor(key);
     this.codex.setCursor = (key,value) => this.store.setCursor(key,value);
@@ -58,7 +63,7 @@ export class ChatBridge {
         observeDiscord: this.attention ? record => this.attention.observe(record) : undefined,
         commands: this.commands,
         isCommand: message => Boolean(parseCommand(message.text,this.commands)),
-        isBound: message => Boolean(parseCommand(message.text,this.commands)) || (!(this.attention && config.type==='discord') && this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind)),
+        isBound: message => Boolean(parseCommand(message.text,this.commands)) || (!(this.attention && config.type==='discord') && (this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind) || this.canAutoBind(config,message))),
       });
       this.adapters.set(config.id, adapter);
 
@@ -79,7 +84,14 @@ export class ChatBridge {
   async receive(config, message) {
     if (!allowed(config,message,{command:Boolean(parseCommand(message.text,this.commands))})) return;
     if(await this.command(config,message))return;
-    const binding = this.config.bindings.find(b => b.adapter === config.id && String(b.chatId) === String(message.chatId) && b.kind === message.kind);
+    let binding;
+    try { binding=await this.ensureBinding(config,message); }
+    catch(error) {
+      this.log.warn('chat task creation was not confirmed',{adapter:config.id,chatId:message.chatId});
+      const route=JSON.stringify([config.id,String(message.chatId)]);
+      this.store.stage(stableId(route,message.id,'create-failure'),route,{text:'聊天任务创建未能确认，请在本机检查后再继续；不会自动重复创建。',target:{chatId:message.chatId,kind:message.kind,userId:message.userId,messageId:message.id},replyTo:message.id});
+      return;
+    }
     if (!binding) { this.log.warn('message ignored: chat has no explicit binding', {adapter:config.id,chatId:message.chatId}); return; }
     const admitted = this.store.admit(config.id,binding.threadId,message);
     this.store.setCursor(`reply:${this.routeKey(binding)}`,{messageId:message.id,userId:message.userId});
@@ -91,6 +103,39 @@ export class ChatBridge {
       // Admission is durable before acknowledging a platform cursor. Submission runs separately.
       queueMicrotask(()=>this.submit().catch(e=>this.log.error('submit failed',e)));
     }
+  }
+  canAutoBind(config,message) {
+    return Boolean(config.autoBind && !(this.attention && config.type==='discord') &&
+      !config.autoBind.excludedChatIds?.includes(String(message.chatId)));
+  }
+  async ensureBinding(config,message) {
+    const existing=this.config.bindings.find(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind);
+    if(existing || !this.canAutoBind(config,message))return existing;
+    const key=JSON.stringify([config.id,String(message.chatId)]);
+    if(this.bindingCreations.has(key))return this.bindingCreations.get(key);
+    const saved=this.store.cursor('auto-bindings') || {};
+    if(saved[key])throw new Error('Previous task creation requires reconciliation');
+    saved[key]={state:'creating'};this.store.setCursor('auto-bindings',saved);
+    const pending=Promise.resolve().then(async()=>{
+      try {
+        let threadId;
+        try { threadId=await this.codex.createThread({cwd:config.autoBind.cwd,model:config.autoBind.model,name:`${config.id} · ${message.chatName || String(message.chatId)}`}); }
+        catch(error) { if(typeof error.threadId==='string' && error.threadId)threadId=error.threadId;else throw error; }
+        if(typeof threadId!=='string' || !threadId)throw new Error('Missing created task id');
+        const binding={adapter:config.id,chatId:String(message.chatId),kind:message.kind,threadId,mirror:true};
+        validateConfig({...this.config,bindings:[...this.config.bindings,binding]});
+        const current=this.store.cursor('auto-bindings') || {};current[key]={state:'bound',binding};this.store.setCursor('auto-bindings',current);
+        this.config.bindings.push(binding);
+        await this.codex.watch?.(threadId);
+        return binding;
+      } catch(error) {
+        const current=this.store.cursor('auto-bindings') || {};
+        if(current[key]?.state!=='bound'){current[key]={state:'uncertain'};this.store.setCursor('auto-bindings',current);}
+        throw error;
+      } finally { this.bindingCreations.delete(key); }
+    });
+    this.bindingCreations.set(key,pending);
+    return pending;
   }
   async builtinCommand(name,{args,message}) {
     if(name==='help')return {text:commandHelp(this.commands,message.kind==='dm')};
@@ -432,7 +477,7 @@ export class ChatBridge {
     await Promise.allSettled([...this.adapters.values()].map(a=>a.stop()));
     await this.codex.stop();
     const deadline = Date.now()+15000;
-    while ((this.flushing || this.submitting || this.attention?.busy) && Date.now()<deadline) await new Promise(r=>setTimeout(r,50));
-    if (!this.flushing && !this.submitting && !this.attention?.busy) this.store.close();
+    while ((this.flushing || this.submitting || this.attention?.busy || this.bindingCreations.size) && Date.now()<deadline) await new Promise(r=>setTimeout(r,50));
+    if (!this.flushing && !this.submitting && !this.attention?.busy && !this.bindingCreations.size) this.store.close();
   }
 }

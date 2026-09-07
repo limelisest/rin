@@ -54,6 +54,100 @@ test('requires start, validates inputs, and propagates queue failure', async t =
   await assert.rejects(bridge.queue('thread-one', { text: 'hello' }), /queue rejected/);
 });
 
+async function creationFixture(t, mode = 'success', timeoutMs = 2_000) {
+  const dir = await mkdtemp(join(tmpdir(), 'rin-thread-create-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = join(dir, 'calls.jsonl');
+  const peer = join(dir, 'peer.mjs');
+  await writeFile(peer, `
+import { appendFileSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+const log = process.argv[2], mode = process.argv[3];
+appendFileSync(log, JSON.stringify({ args: process.argv.slice(4), home: process.env.CODEX_HOME, pid: process.pid }) + '\\n');
+const input = createInterface({ input: process.stdin });
+input.on('line', line => {
+  const message = JSON.parse(line);
+  appendFileSync(log, JSON.stringify(message) + '\\n');
+  if (message.method === 'initialized') return;
+  const reply = result => process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
+  const error = () => process.stdout.write(JSON.stringify({ id: message.id, error: { code: -32000, message: 'fixture rejected' } }) + '\\n');
+  if (message.method === 'initialize') return mode === 'initialize-error' ? error() : reply({});
+  if (message.method === 'thread/start') {
+    if (mode === 'lost') return process.exit(7);
+    if (mode === 'hang') return;
+    if (mode === 'start-error') return error();
+    if (mode === 'missing-id') return reply({ thread: {} });
+    process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id: 'new-thread' } } }) + '\\n');
+    return reply({ thread: { id: 'new-thread' } });
+  }
+  if (message.method === 'thread/name/set') return mode === 'name-error' ? error() : reply({});
+  throw new Error('Unexpected method: ' + message.method);
+});
+input.on('close', () => process.exit(0));
+`);
+  const bridge = new CodexBridge({ command: [process.execPath, peer, log, mode], codexHome: dir, queueTimeoutMs: timeoutMs });
+  await bridge.start();
+  t.after(() => bridge.stop());
+  const calls = async () => (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  return { bridge, dir, calls };
+}
+
+test('creates and names a persistent thread without starting a turn and closes its child', async t => {
+  const f = await creationFixture(t);
+  assert.equal(await f.bridge.createThread({ cwd: f.dir, model: 'selected-model', name: '频道 $(literal)' }), 'new-thread');
+  const [processCall, ...calls] = await f.calls();
+  assert.deepEqual(processCall.args, ['app-server', '--stdio']);
+  assert.equal(processCall.home, f.dir);
+  assert.deepEqual(calls.map(call => call.method), ['initialize', 'initialized', 'thread/start', 'thread/name/set']);
+  assert.deepEqual(calls[2].params, { cwd: f.dir, model: 'selected-model', ephemeral: false });
+  assert.deepEqual(calls[3].params, { threadId: 'new-thread', name: '频道 $(literal)' });
+  assert.equal(f.bridge.children.size, 0);
+  assert.throws(() => process.kill(processCall.pid, 0), { code: 'ESRCH' });
+});
+
+test('creation omits optional configuration and validates before launching', async t => {
+  const f = await creationFixture(t);
+  await assert.rejects(f.bridge.createThread({}), /cwd required/);
+  await assert.rejects(f.bridge.createThread({ cwd: f.dir, model: '' }), /model required/);
+  await assert.rejects(f.bridge.createThread({ cwd: f.dir, name: null }), /name required/);
+  assert.equal(await f.bridge.createThread({ cwd: '.' }), 'new-thread');
+  const [, ...calls] = await f.calls();
+  assert.deepEqual(calls.map(call => call.method), ['initialize', 'initialized', 'thread/start']);
+  assert.deepEqual(calls[2].params, { cwd: process.cwd(), ephemeral: false });
+  await f.bridge.stop();
+  await assert.rejects(f.bridge.createThread({ cwd: f.dir }), /not started/);
+});
+
+for (const mode of ['initialize-error', 'start-error', 'lost', 'missing-id', 'hang', 'name-error']) {
+  test(`thread creation ${mode} preserves uncertainty and closes without replay`, async t => {
+    const f = await creationFixture(t, mode, mode === 'hang' ? 250 : 2_000);
+    await assert.rejects(f.bridge.createThread({ cwd: f.dir, name: 'optional title' }), error => {
+      assert.equal(error.code, mode === 'initialize-error' ? 'CODEX_THREAD_CREATE_FAILED' : 'CODEX_THREAD_CREATE_UNCERTAIN');
+      assert.equal(error.threadId, mode === 'name-error' ? 'new-thread' : undefined);
+      return true;
+    });
+    const [processCall, ...calls] = await f.calls();
+    assert.equal(calls.filter(call => call.method === 'thread/start').length, mode === 'initialize-error' ? 0 : 1);
+    assert.equal(calls.some(call => call.method === 'turn/start'), false);
+    assert.equal(f.bridge.children.size, 0);
+    assert.throws(() => process.kill(processCall.pid, 0), { code: 'ESRCH' });
+  });
+}
+
+test('stopping the bridge cancels an in-flight creation without replay', async t => {
+  const f = await creationFixture(t, 'hang');
+  const creation = f.bridge.createThread({ cwd: f.dir });
+  const rejected = assert.rejects(creation, { code: 'CODEX_THREAD_CREATE_UNCERTAIN' });
+  const deadline = Date.now() + 1_000;
+  while (!(await f.calls().catch(() => [])).some(call => call.method === 'thread/start')) {
+    assert.ok(Date.now() < deadline, 'fixture should receive thread/start');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  await f.bridge.stop();
+  await rejected;
+  assert.equal(f.bridge.children.size, 0);
+});
+
 function historyFixture(dir) {
   const state = new DatabaseSync(join(dir, 'state_5.sqlite'));
   state.exec(`CREATE TABLE threads (id TEXT PRIMARY KEY, cli_version TEXT NOT NULL, history_mode TEXT NOT NULL)`);

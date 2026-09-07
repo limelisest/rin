@@ -74,6 +74,7 @@ export function normalizeDiscordMessage(message, config, selfId = '', commands =
   if (mentioned && kind === 'group') for (const token of mentionTokens) text = text.split(token).join('').trim();
   if (!userId || !admitted({...config,type:'discord'},userId,kind,{command:Boolean(parseCommand(text,commands))}))return null;
   return {id: String(message.id), chatId: String(message.channelId), userId, kind, mentioned, text,
+    ...(message.channel?.name ? {chatName:String(message.channel.name).slice(0,100)} : {}),
     replyTo: message.reference?.messageId ? String(message.reference.messageId) : undefined};
 }
 

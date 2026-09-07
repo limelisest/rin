@@ -100,3 +100,17 @@ The working indicator is plain display text. Put optional settings in the privat
 Nonempty `frames` take priority over `text`. If neither is supplied, Rin uses one `Working...` frame. Editable platforms rotate configured frames while preserving existing summaries and commentary. Final output, completion, failure, observer errors, and shutdown stop rotation. Platforms without editing receive one working marker. This setting does not select a language or change other chat text.
 
 QQ official [command panels](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/menu-panel/) fill the chat input box. Message admission and passive-reply rules still apply; this API is unrelated to OneBot v11.
+
+
+## 首条消息自动建立任务
+
+适配器可配置 `autoBind`，无需逐个频道预建 Codex 任务：
+
+```json
+"autoBind": {
+  "cwd": "/absolute/path/to/chat-workspace",
+  "excludedChatIds": ["channel-to-leave-unbound"]
+}
+```
+
+`cwd` 为新任务的工作目录；可选 `model` 指定模型，省略则使用当前 Codex 配置。现有显式绑定优先。未绑定聊天在第一条通过用户白名单、群提及要求的普通消息（包括有附件的消息）到达时建立独立任务；命令不会创建任务。结果存入聊天桥状态库，后续消息及重启复用它。创建结果不确定时保留标记并停止自动重建，需核对后处理，避免出现重复任务。Discord 启用 Nerve attention 时仍由 attention 管理普通消息，不同时自动绑定；切换为直接桥接时关闭 `attention`。自动绑定只从实际收到的聊天建立，不枚举频道或预建空任务。

@@ -1,8 +1,9 @@
 import { CodexAppIpc } from '../codex-app-ipc.mjs';
 import { wakeCodexApp } from '../codex-app-wake.mjs';
 import { CodexQueue } from '../codex-queue.mjs';
+import { createCodexThread } from './codex-thread-create.mjs';
 import { DatabaseSync } from 'node:sqlite';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
 const REQUIRED_HISTORY_COLUMNS = {
@@ -33,12 +34,12 @@ function visibleItem(row) {
 }
 
 /**
- * Thin bridge to an existing Codex App thread.
+ * Thin bridge to Codex App threads, with a short-lived creation client.
  *
  * Optional App IPC submits input and can load an unowned task through its App URL. Until the desktop
  * shared daemon exposes a working subscriber handshake, watch() uses a pinned,
  * read-only observer for the 0.153.x paginated history schema. It never starts
- * a second app-server or takes ownership of the thread.
+ * a second app-server or takes ownership of an existing thread.
  */
 export class CodexBridge extends CodexQueue {
   constructor({ command = ['codex'], codexHome = join(homedir(), '.codex'), onEvent = () => {}, getCursor, setCursor, pollMs = 500, queueTimeoutMs = 30_000, appSteering = false, appWake = false, wakeApp = wakeCodexApp } = {}) {
@@ -56,6 +57,15 @@ export class CodexBridge extends CodexQueue {
     if (appWake && !appSteering) throw new Error('appWake requires appSteering');
     this.wakeApp = appWake ? wakeApp : null;
     this.wakeTimeoutMs = queueTimeoutMs;
+  }
+
+  async createThread({ cwd, model, name } = {}) {
+    if (!this.started) throw new Error('CodexBridge not started');
+    const directory = resolve(requiredText(cwd, 'cwd'));
+    const selectedModel = model === undefined ? undefined : requiredText(model, 'model');
+    const title = name === undefined ? undefined : requiredText(name, 'name');
+    return createCodexThread({ command: this.command, codexHome: this.codexHome,
+      timeoutMs: this.queueTimeoutMs, children: this.children, cwd: directory, model: selectedModel, name: title });
   }
 
   async queue(threadId, input = {}) {

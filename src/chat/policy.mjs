@@ -1,3 +1,4 @@
+import {isAbsolute} from 'node:path';
 export const adapterTypes = ['discord', 'telegram', 'qqbot', 'onebot', 'feishu'];
 
 export function validateConfig(config) {
@@ -8,6 +9,12 @@ export function validateConfig(config) {
     if (!adapterTypes.includes(a.type)) throw new Error(`Unsupported adapter type: ${a.type}`);
     if (!Array.isArray(a.allowUsers) || a.allowUsers.some(x => typeof x !== 'string')) throw new Error(`allowUsers must be an array of user IDs: ${a.id}`);
     if (a.enabled !== false && a.allowUsers.length === 0) throw new Error(`Enabled adapter requires an explicit allowUsers list: ${a.id}`);
+    if (a.autoBind !== undefined && a.autoBind !== false) {
+      const v=a.autoBind;
+      if (!v || typeof v!=='object' || Array.isArray(v) || typeof v.cwd!=='string' || !isAbsolute(v.cwd) ||
+        (v.model!==undefined && (typeof v.model!=='string' || !v.model.trim())) ||
+        (v.excludedChatIds!==undefined && (!Array.isArray(v.excludedChatIds) || v.excludedChatIds.some(id=>typeof id!=='string')))) throw new Error('autoBind requires an absolute cwd and optional model/excludedChatIds');
+    }
     ids.add(a.id);
   }
   const routes = new Set();

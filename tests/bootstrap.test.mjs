@@ -107,6 +107,8 @@ test('Windows bootstrap retains its local-entry, legacy-runtime exclusion, and v
   const source=await readFile(windowsInstaller,'utf8');
   assert.match(source,/\$rinNodeVersion = '24\.18\.0'/);
   assert.match(source,/\$nodePath\.StartsWith\(\(Join-Path \$env:USERPROFILE '\.rin'\) \+ '\\', \[StringComparison\]::OrdinalIgnoreCase\)/);
+  assert.match(source,/\$nodeVersion = & \$nodeCommand\.Source --version/);
+  assert.doesNotMatch(source,/process\.versions\.node\.split/);
   assert.match(source,/Get-FileHash -LiteralPath \$archivePath -Algorithm SHA256/);assert.match(source,/if \(\$actual -ne \$expected\) \{ throw 'Node\.js archive checksum verification failed\.' \}/);
   assert.match(source,/if \(\$PSScriptRoot -and \(Test-Path \(Join-Path \$PSScriptRoot 'src\/install\/bootstrap\.mjs'\)\)\) \{\s*& node \(Join-Path \$PSScriptRoot 'src\/install\/bootstrap\.mjs'\)/s);
 });

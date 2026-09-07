@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
-import {Store,Nerve,makeServer} from '../src/nerve.mjs';
-import {createHandler} from '../src/nerve-mcp.mjs';
+import {Store,Nerve,makeServer} from '../dist/nerve.js';
+import {createHandler} from '../dist/nerve-mcp.js';
 
 test('Gateway admission through Nerve HTTP becomes a canonical range event and explicit MCP reply',async t=>{
  const store=new Store(':memory:');t.after(()=>store.close());

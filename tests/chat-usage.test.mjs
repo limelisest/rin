@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { createCodexUsageProvider, executeUsage, normalizeUsageResponse, parseUsageArgs, renderCurrentUsage } from '../src/chat/usage.mjs';
+import { createCodexUsageProvider, executeUsage, normalizeUsageResponse, parseUsageArgs, renderCurrentUsage } from '../dist/chat/usage.js';
 
 async function fixture(t) {
   const dataDir = await mkdtemp(join(tmpdir(), 'rin-usage-'));

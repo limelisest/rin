@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,readFile,writeFile,rm,access} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {ensureNerveMcp} from '../src/install/nerve.mjs';
+import {ensureNerveMcp} from '../dist/install/nerve.js';
 
 async function fixture(t) {
   const home=await mkdtemp(join(tmpdir(),'rin-install-nerve-'));

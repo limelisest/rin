@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CodexAppExec } from '../src/codex-app-exec.mjs';
-import { Nerve, Store, validateConfig } from '../src/nerve.mjs';
+import { CodexAppExec } from '../dist/codex-app-exec.js';
+import { Nerve, Store, validateConfig } from '../dist/nerve.js';
 
 const threadId = '11111111-1111-4111-8111-111111111111';
 function setup(queue, timeoutMs = 1000) {

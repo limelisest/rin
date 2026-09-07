@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadCommandExtensions } from '../src/chat/command-extensions.mjs';
+import { loadCommandExtensions } from '../dist/chat/command-extensions.js';
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'rin-command-extensions-'));

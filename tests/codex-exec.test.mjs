@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodexExec } from '../src/codex-exec.mjs';
+import { CodexExec } from '../dist/codex-exec.js';
 const id = '22222222-2222-4222-8222-222222222222';
 const emit = value => `console.log(${JSON.stringify(JSON.stringify(value))});`;
 const start = emit({ type: 'thread.started', thread_id: id });

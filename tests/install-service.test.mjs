@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {createService,daemonReady} from '../src/install/service.mjs';
+import {createService,daemonReady} from '../dist/install/service.js';
 
 async function fixture(t,platform,run) {
   const root=await mkdtemp(join(tmpdir(),'rin-service-'));t.after(()=>rm(root,{recursive:true,force:true}));

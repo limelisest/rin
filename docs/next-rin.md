@@ -60,3 +60,7 @@ App 路径使用当前用户的本机 IPC：发现任务 owner，忙时 steer，
 平台注册按最终目录清理旧命令；真实 API 回读与用户调用端到端验收分开。Working 仅支持自定义 `text`/`frames`，私人的旧原文只进入私有配置；公开默认文本通用。详见 [聊天桥](chat-bridge.md)。
 
 安装器新增显式选择的推荐 profile，通过 Codex 配置协议合并指定键，完整访问范围在选择前说明；选中后包含完整文件访问与 `approval_policy = "never"`，预览会明确说明；未选中的配置保持不变。普通 `rin update` 不自动套用 profile。见 [安装说明](installation.md)。
+
+## TypeScript 构建
+
+产品实现位于 `src/**/*.ts`，启用 strict 与 NodeNext，统一编译到 `dist/` 再执行；不依赖 Node 的实验性原生 TypeScript 加载。Git 安装和更新安装锁定构建依赖，并在切换发布版本前编译及运行回归。原有 `.mjs` 启动器和候选迁移入口保留为薄兼容层，私有命令扩展仍支持 `.mjs`。

@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { QQBot } from '@tencent-connect/qqbot-nodejs';
-import { createAdapter as createQQ } from '../src/chat/adapters/qqbot.mjs';
-import { createAdapter as createOneBot } from '../src/chat/adapters/onebot.mjs';
-import { createAdapter as createFeishu } from '../src/chat/adapters/feishu.mjs';
+import { createAdapter as createQQ } from '../dist/chat/adapters/qqbot.js';
+import { createAdapter as createOneBot } from '../dist/chat/adapters/onebot.js';
+import { createAdapter as createFeishu } from '../dist/chat/adapters/feishu.js';
 
 async function context() {
   return { dataDir: await mkdtemp(path.join(tmpdir(), 'rin-chat-')), log: {}, getCursor() {}, setCursor() {} };

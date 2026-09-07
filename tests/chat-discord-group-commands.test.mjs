@@ -4,8 +4,8 @@ import {EventEmitter} from 'node:events';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {ChatBridge} from '../src/chat/bridge.mjs';
-import {createAdapter,normalizeDiscordMessage} from '../src/chat/adapters/discord.mjs';
+import {ChatBridge} from '../dist/chat/bridge.js';
+import {createAdapter,normalizeDiscordMessage} from '../dist/chat/adapters/discord.js';
 
 test('Discord clears guild overrides and executes admitted group usage through the attention bridge',async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-group-command-'));const menus=[],edits=[];let observed=0,reads=0;

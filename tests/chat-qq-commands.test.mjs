@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {QQ_COMMAND_PANEL_REMARK, qqCommandPanels, syncQQCommandPanels} from '../src/chat/qq-commands.mjs';
+import {QQ_COMMAND_PANEL_REMARK, qqCommandPanels, syncQQCommandPanels} from '../dist/chat/qq-commands.js';
 
 const commands=[
   {name:'help',description:'Show available commands'},

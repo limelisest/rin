@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {ChatStore} from '../src/chat/store.mjs';
-import {AttentionClient} from '../src/chat/attention-client.mjs';
+import {ChatStore} from '../dist/chat/store.js';
+import {AttentionClient} from '../dist/chat/attention-client.js';
 
 test('attention forwarding survives failure and restart without losing stable identities',async t=>{
  const dir=mkdtempSync(join(tmpdir(),'rin-attention-'));

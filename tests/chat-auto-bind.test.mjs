@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {ChatBridge} from '../src/chat/bridge.mjs';
-import {validateConfig} from '../src/chat/policy.mjs';
+import {ChatBridge} from '../dist/chat/bridge.js';
+import {validateConfig} from '../dist/chat/policy.js';
 
 test('shipped chat template enables lazy binding without enabling adapters',()=>{
  const config=JSON.parse(readFileSync(new URL('../examples/chat.json',import.meta.url),'utf8'));

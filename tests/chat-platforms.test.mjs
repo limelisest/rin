@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
-import {createAdapter as discordAdapter, normalizeDiscordMessage} from '../src/chat/adapters/discord.mjs';
-import {createAdapter as telegramAdapter, normalizeTelegramUpdate} from '../src/chat/adapters/telegram.mjs';
+import {createAdapter as discordAdapter, normalizeDiscordMessage} from '../dist/chat/adapters/discord.js';
+import {createAdapter as telegramAdapter, normalizeTelegramUpdate} from '../dist/chat/adapters/telegram.js';
 
 test('Discord rejects bots, guild messages by default, and users outside the allowlist', () => {
   const base = {id: '1', channelId: 'c', content: 'hello', attachments: new Map(), author: {id: 'allowed'}};

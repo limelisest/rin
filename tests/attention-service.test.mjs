@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Store} from '../src/nerve.mjs';
-import {AttentionService} from '../src/attention-service.mjs';
+import {Store} from '../dist/nerve.js';
+import {AttentionService} from '../dist/attention-service.js';
 const config = {ownerUserIds:['owner'],ignoredChatKeys:['discord/bot:notes'],mirrorDiscordChannelIds:['mirror'],mirrorDiscordCategoryId:'category',ambientWindowMs:900000,target:'main'};
 const at = Date.parse('2026-09-05T12:01:00Z');
 const record = (extra={}) => ({id:'a',messageId:'123',platform:'discord',platformInstance:'bot',chatKey:'discord/bot:room',chatType:'group',userId:'owner',authorName:'Owner',text:'secret message text',receivedAt:new Date(at).toISOString(),disposition:'record_only',ancestorIds:[],...extra});

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChatStore } from '../src/chat/store.mjs';
-import { allowed, splitText, validateConfig } from '../src/chat/policy.mjs';
+import { ChatStore } from '../dist/chat/store.js';
+import { allowed, splitText, validateConfig } from '../dist/chat/policy.js';
 
 test('inbound replay is deduped and ambiguous submission stays uncertain across restart', () => {
   const dir = mkdtempSync(join(tmpdir(),'rin-store-')); const path = join(dir,'chat.sqlite');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {adapterTypes,allowed} from '../src/chat/policy.mjs';
+import {adapterTypes,allowed} from '../dist/chat/policy.js';
 
 test('all adapters admit registered group commands by identity while preserving ordinary routing and mention',()=>{
   for(const type of adapterTypes){

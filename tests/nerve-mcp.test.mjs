@@ -6,7 +6,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { createHandler, toolDefinitions } from '../src/nerve-mcp.mjs';
+import { createHandler, toolDefinitions } from '../dist/nerve-mcp.js';
 
 const token = 'test-only-nerve-token-abcdefghijklmnopqrstuvwxyz';
 const rpc = (method, params = {}, id = 1) => ({ jsonrpc: '2.0', id, method, params });

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { CodexBridge } from '../src/chat/codex.mjs';
+import { CodexBridge } from '../dist/chat/codex.js';
 
 async function fixture(t, { fail = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'rin-codex-bridge-'));

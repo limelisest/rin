@@ -1,3 +1,6 @@
+export interface CostTrendInput {days: number; peak_cost: number; total_cost: number; points: {timestamp: string; cost_total: number | null}[];}
+export interface CodexUsageWindow { name: string; percentLeft?: number; resetAt?: string; }
+export interface CodexUsageStatus { accountName?: string; accountId: string; plan?: string; credits?: string; windows: CodexUsageWindow[]; }
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,14 +9,14 @@ import { deflateSync } from "node:zlib";
 import {
   formatUsdEquivalent,
   type UsageTrendSeries,
-} from "./usage-trend.ts";
+} from "./usage-trend.js";
 
 type Rgba = readonly [number, number, number, number];
 
 export type CodexUsageCardOptions = {
   outputDir?: string;
   now?: () => Date;
-  trend?: UsageTrendSeries;
+  trend?: CostTrendInput;
   trendTitle?: string;
   trendSecondary?: string;
   trendFooter?: string;
@@ -199,7 +202,7 @@ function formatTrendDateLabel(value: string): string {
   return match ? `${match[1]}/${match[2]}` : value;
 }
 
-export function buildUsageCostTrendView(trend: UsageTrendSeries) {
+export function buildUsageCostTrendView(trend: CostTrendInput) {
   const ticks = buildTrendYAxisTicks(trend.peak_cost);
   const dateLabels = trend.points.map((point) =>
     formatTrendDateLabel(point.timestamp),

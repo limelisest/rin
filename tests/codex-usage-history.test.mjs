@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, appendFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readCodexTokenTrend, parseCodexUsageRecord } from '../src/chat/codex-usage-history.mjs';
-import { buildUsageCostTrendView, renderCodexUsageCardPng } from '../src/chat/usage-card.ts';
+import { readCodexTokenTrend, parseCodexUsageRecord } from '../dist/chat/codex-usage-history.js';
+import { buildUsageCostTrendView, renderCodexUsageCardPng } from '../dist/chat/usage-card.js';
 const context = JSON.stringify({type:'session_meta',payload:{id:'thread-1',model_provider:'openai'}})+'\n'+JSON.stringify({type:'turn_context',payload:{turn_id:'turn-1',model:'gpt-6-astra'}})+'\n';
 const record = (id, timestamp = '2026-09-06T16:01:00Z', total = 110) => context + JSON.stringify({ type: 'token_usage_record', timestamp, payload: { response_id: id, thread_id:'thread-1', turn_id:'turn-1', usage: { input_tokens: total - 10, cached_input_tokens: 80, output_tokens: 10, total_tokens: total }, turn_token_usage: { total_tokens: 999999 } } }) + '\n';
 async function fixture(t) {
@@ -48,7 +48,7 @@ test('conflicts and invalid candidate records mark incomplete coverage', async t
 });
 
 test('Standard price snapshot applies full-request tiers and leaves unknown prices unpriced', async () => {
-  const { estimateCodexUsageCost } = await import('../src/chat/codex-usage-pricing.mjs');
+  const { estimateCodexUsageCost } = await import('../dist/chat/codex-usage-pricing.js');
   const usage = {input: 20000, cached: 252000, cache_write:0, output:1000};
   assert.equal(estimateCodexUsageCost(usage, 'gpt-6-astra'), 0.502);
   assert.equal(estimateCodexUsageCost({...usage, input:20001}, 'gpt-6-astra'), 0.97902);
@@ -71,7 +71,7 @@ test('binds nearest preceding model per request, including model changes within 
 });
 
 test('single USD curve uses only Codex and never reads legacy cost history', async t => {
-  const {executeUsage} = await import('../src/chat/usage.mjs');
+  const {executeUsage} = await import('../dist/chat/usage.js');
   const {dir,options} = await fixture(t);
   await mkdir(join(options.dataDir,'usage'),{recursive:true});
   const historyPath = join(options.dataDir,'usage','cost-history.json');

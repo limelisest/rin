@@ -12,7 +12,7 @@ QQ 入站图片已实际下载并被模型查看，图片生成工具也已成�
 
 真实补发尝试中，图片上传接口返回成功，但 QQ 消息发送返回“msgid已经过期,不能回复”。因此“图片上传”已验证，“修复后图片最终抵达群聊”尚未验证。失败项保留，未自动重放；需要新消息提供有效被动回复窗口。旧版 OneBot 的发送方式不能作为 QQ 官方 API 的时限保证。
 
-源码证据：`src/chat/codex.mjs`、`src/chat/bridge.mjs`、`src/chat/files.mjs`、`src/chat/adapters/qqbot.mjs`；回归：`tests/chat-codex.test.mjs`、`tests/chat-bridge.test.mjs`。
+源码证据：`src/chat/codex.ts`、`src/chat/bridge.ts`、`src/chat/files.ts`、`src/chat/adapters/qqbot.ts`；回归：`tests/chat-codex.test.mjs`、`tests/chat-bridge.test.mjs`。
 
 ## 五类明确差距
 
@@ -24,7 +24,7 @@ QQ 入站图片已实际下载并被模型查看，图片生成工具也已成�
 | Telegram 消息更新 | 旧版处理 edited_message、channel_post 等事件 | 新版轮询只接收 message，消息编辑、频道帖等事件未接入。 |
 | 执行状态展示 | 旧运行时提供 todo、上下文压缩等状态 | 新桥主要观察公开文字、摘要及本次新增图片结果；样式中有 todo 区域不代表已有真实 todo/压缩事件。 |
 
-证据入口：`src/chat/policy.mjs`、`src/chat/adapters/{discord,telegram,qqbot,onebot}.mjs`、`src/chat/codex.mjs`。旧身份库与旧规范数据库仅在私人环境只读核对，不进入公开仓库。旧 OneBot 实现位于旧扩展仓库 `extensions/onebot-platform.ts`，重点为媒体归一化和 `get_forward_msg` 处理。
+证据入口：`src/chat/policy.ts`、`src/chat/adapters/{discord,telegram,qqbot,onebot}.ts`、`src/chat/codex.ts`。旧身份库与旧规范数据库仅在私人环境只读核对，不进入公开仓库。旧 OneBot 实现位于旧扩展仓库 `extensions/onebot-platform.ts`，重点为媒体归一化和 `get_forward_msg` 处理。
 
 ## 五类验收空白
 

@@ -7,11 +7,11 @@ import {tmpdir} from 'node:os';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline';
-import {startDaemon} from '../src/daemon.mjs';
-import {writeNerveLauncher} from '../src/install/setup.mjs';
-import {ensureNerveMcp} from '../src/install/nerve.mjs';
-import {activateNerveMcp} from '../src/install/nerve-service.mjs';
-import {runUpdateMigrations} from '../src/install/migrations.mjs';
+import {startDaemon} from '../dist/daemon.js';
+import {writeNerveLauncher} from '../dist/install/setup.js';
+import {ensureNerveMcp} from '../dist/install/nerve.js';
+import {activateNerveMcp} from '../dist/install/nerve-service.js';
+import {runUpdateMigrations} from '../dist/install/migrations.js';
 
 async function fixture(t) {
   const home=await mkdtemp(join(tmpdir(),'rin-nerve-runtime-'));

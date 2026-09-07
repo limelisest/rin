@@ -47,10 +47,13 @@ QQ 官方机器人与 OneBot v11 是两种独立协议，必须分别配置、�
 
 ```sh
 npm ci
+npm run build
 npm test
 node src/rin.mjs check /absolute/path/to/private/chat.json
 node src/daemon.mjs /absolute/path/to/private/daemon.json
 ```
+
+产品源码使用严格 TypeScript（`src/**/*.ts`），`npm run typecheck` 检查类型，`npm run build` 生成 `dist/`。测试会先重新编译；安装和更新也会安装构建依赖并完成编译、回归后再切换版本。少量 `src/*.mjs` 入口只负责兼容已有启动器，不包含产品实现。
 
 Codex App 路径依赖已核对的内部 IPC 与只读历史投影，目前锁定 0.153.x / paginated 模式。`appSteering` 和 `appWake` 为显式开关；自动唤醒目前仅支持 macOS。默认 CLI queue 的成功回执只代表排队，不保证未加载任务立即执行。版本升级或协议变化需要重新验证。
 

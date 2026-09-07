@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store, Nerve, scheduleSlot, runCommand, makeServer, validateConfig } from '../src/nerve.mjs';
+import { Store, Nerve, scheduleSlot, runCommand, makeServer, validateConfig } from '../dist/nerve.js';
 
 test('attention scheduling reads the real Codex App thread activity',()=>{
  const store=new Store(':memory:');const threadId='11111111-1111-1111-1111-111111111111';

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,mkdirSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {ChatBridge} from '../src/chat/bridge.mjs';
-import {COMMANDS,parseCommand} from '../src/chat/commands.mjs';
+import {ChatBridge} from '../dist/chat/bridge.js';
+import {COMMANDS,parseCommand} from '../dist/chat/commands.js';
 
 test('the built-in catalog is minimal and accepts a shared extension grammar',()=>{
   assert.deepEqual(COMMANDS.map(c=>c.name),['help','usage']);
@@ -39,7 +39,7 @@ test('every admitted caller can execute usage, extension privacy stays explicit,
 });
 
 test('slow menu registration does not block readiness and its later failure is handled',async()=>{
-  const {registerCommands}=await import('../src/chat/commands.mjs');let reject;const warnings=[];
+  const {registerCommands}=await import('../dist/chat/commands.js');let reject;const warnings=[];
   await registerCommands(()=>new Promise((_,fail)=>{reject=fail;}),{warn:m=>warnings.push(m)},'menu registration failed',5);
   assert.equal(warnings.length,0);reject(new Error('secret request metadata'));
   await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(warnings,['menu registration failed']);

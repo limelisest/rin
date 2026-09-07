@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,readFileSync,rmSync,realpathSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {Nerve,Store,validateConfig} from '../src/nerve.mjs';
+import {Nerve,Store,validateConfig} from '../dist/nerve.js';
 
 const threadId='12345678-1234-1234-1234-123456789abc';
 function fixture(t,fail=false) {

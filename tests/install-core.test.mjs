@@ -6,9 +6,9 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { prepareRelease, switchRelease, withInstallLock, run } from '../src/install/core.mjs';
-import { writeLaunchers } from '../src/install/setup.mjs';
-import { routeArgs } from '../src/cli.mjs';
+import { prepareRelease, switchRelease, withInstallLock, run } from '../dist/install/core.js';
+import { writeLaunchers } from '../dist/install/setup.js';
+import { routeArgs } from '../dist/cli.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -73,7 +73,7 @@ test('a fast-forward candidate is verified in isolation without touching the run
   assert.equal(await readFile(join(running, 'live-marker'), 'utf8'), 'still running');
   assert.equal(await readFile(join(candidate.release, 'src/cli.mjs'), 'utf8'), 'export const version = 2;\n');
   assert.equal(JSON.parse(await readFile(join(candidate.release, '.rin-verified.json'), 'utf8')).sha, next);
-  assert.deepEqual(runner.npm.map(call => call.args.slice(1)), [['ci', '--ignore-scripts'], ['test']]);
+  assert.deepEqual(runner.npm.map(call => call.args.slice(1)), [['ci', '--ignore-scripts', '--include=dev'], ['test']]);
 });
 
 test('an update rejects rewritten history instead of replacing the current lineage', async t => {

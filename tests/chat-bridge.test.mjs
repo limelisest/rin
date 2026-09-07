@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync,writeFileSync,symlinkSync,mkdirSync,realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChatBridge } from '../src/chat/bridge.mjs';
-import { outputFiles } from '../src/chat/files.mjs';
+import { ChatBridge } from '../dist/chat/bridge.js';
+import { outputFiles } from '../dist/chat/files.js';
 
 test('usage cards stay image-only on every chat transport while retaining a delivery fallback',async()=>{
   for(const type of ['discord','telegram','qqbot','onebot','feishu']){

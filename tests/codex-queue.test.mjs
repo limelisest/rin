@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodexQueue } from '../src/codex-queue.mjs';
+import { CodexQueue } from '../dist/codex-queue.js';
 
 async function peer(t, source) {
   const dir = await mkdtemp(join(tmpdir(), 'rin-native-queue-'));

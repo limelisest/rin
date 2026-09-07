@@ -4,7 +4,7 @@ import net from 'node:net';
 import { chmod, mkdtemp, mkdir, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodexAppIpc } from '../src/codex-app-ipc.mjs';
+import { CodexAppIpc } from '../dist/codex-app-ipc.js';
 
 const threadId = '22222222-2222-4222-8222-222222222222';
 const unixSocketTest = process.platform === 'win32'

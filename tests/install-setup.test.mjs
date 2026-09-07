@@ -5,8 +5,8 @@ import {spawn} from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join,resolve } from 'node:path';
 import {pathToFileURL} from 'node:url';
-import { appendAgentsInstructions, RIN_SUBAGENT_INSTRUCTIONS, collectChoices, inspectLegacy, disableLegacy, ensureCommandPath, writeLaunchers } from '../src/install/setup.mjs';
-import {migrateAgentsInstructions,RIN_LEGACY_SUBAGENT_INSTRUCTIONS} from '../src/install/instructions.mjs';
+import { appendAgentsInstructions, RIN_SUBAGENT_INSTRUCTIONS, collectChoices, inspectLegacy, disableLegacy, ensureCommandPath, writeLaunchers } from '../dist/install/setup.js';
+import {migrateAgentsInstructions,RIN_LEGACY_SUBAGENT_INSTRUCTIONS} from '../dist/install/instructions.js';
 
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'rin-setup-'));
@@ -188,7 +188,7 @@ test('setup CLI reports the non-interactive preflight failure once', async () =>
 });
 
 test('installer and CLI imports do not require the SQLite runtime', async () => {
-  const modules=['src/install/setup.mjs','src/install/migrations.mjs','src/install/nerve.mjs','src/cli.mjs'];
+  const modules=['src/install/setup.mjs','src/install/migrations.mjs','dist/install/nerve.js','src/cli.mjs'];
   const source=modules.map(file=>`await import(${JSON.stringify(pathToFileURL(resolve(file)).href)});`).join('\n');
   const result=await runEntry(['--no-experimental-sqlite','--input-type=module','--eval',source]);
   assert.equal(result.code,0,result.stderr);

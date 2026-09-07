@@ -11,7 +11,7 @@
 - 开启 `appWake` 且任务未加载：通过 macOS 原生任务链接加载，重新读取忙闲状态，再提交；可能显示对应任务窗口。
 - 未启用 App 路径：使用原生 `codex queue`，成功只表示排队。
 
-带图片的 App 输入使用受支持的本地图片附件；其他文件保留明确的本地路径上下文。详见 `src/codex-queue.mjs` 与 `src/codex-app-ipc.mjs`。
+带图片的 App 输入使用受支持的本地图片附件；其他文件保留明确的本地路径上下文。详见 `src/codex-queue.ts` 与 `src/codex-app-ipc.ts`。
 
 ## 本机 IPC
 
@@ -31,6 +31,6 @@ Nerve 的 App 执行器使用提交回执里的 turnId 匹配真实完成，最�
 
 ## 验证
 
-源码入口：`src/codex-app-ipc.mjs`、`src/codex-app-wake.mjs`、`src/chat/codex.mjs`、`src/codex-app-exec.mjs`。
+源码入口：`src/codex-app-ipc.ts`、`src/codex-app-wake.ts`、`src/chat/codex.ts`、`src/codex-app-exec.ts`。
 
 测试覆盖分帧、owner 发现、活动/空闲路由、图片输入、超时不重投、未加载任务唤醒、公开输出隔离和游标恢复。已有真实任务的文本 start/steer、活动轮图片输入和一次未加载任务唤醒证据；完整 App 重启后的跨平台往返、各种附件及断网恢复仍需持续验收，见 [能力审计](chat-parity-audit.md)。

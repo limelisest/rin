@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { startDaemon } from '../src/daemon.mjs';
+import { startDaemon } from '../dist/daemon.js';
 
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'rin-daemon-'));

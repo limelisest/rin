@@ -4,10 +4,10 @@ import {execFileSync} from 'node:child_process';
 import {cp,mkdtemp,mkdir,readFile,realpath,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {RIN_LEGACY_SUBAGENT_INSTRUCTIONS,RIN_SUBAGENT_INSTRUCTIONS} from '../src/install/instructions.mjs';
-import {runUpdateMigrations,migrationHome} from '../src/install/migrations.mjs';
+import {RIN_LEGACY_SUBAGENT_INSTRUCTIONS,RIN_SUBAGENT_INSTRUCTIONS} from '../dist/install/instructions.js';
+import {runUpdateMigrations,migrationHome} from '../dist/install/migrations.js';
 import {pathToFileURL} from 'node:url';
-import {main} from '../src/cli.mjs';
+import {main} from '../dist/cli.js';
 
 test('ordinary update runs managed migrations without applying the recommended profile',async t=>{
   const codexHome=await mkdtemp(join(tmpdir(),'rin-update-migrations-'));
@@ -63,6 +63,7 @@ test('migration loaded by an older updater repairs its custom home without recei
   const home=join(root,'custom install'),codexHome=join(root,'codex'),release=join(home,'releases','b'.repeat(40));
   await mkdir(codexHome);await mkdir(release,{recursive:true});
   await cp(join(process.cwd(),'src'),join(release,'src'),{recursive:true});
+  await cp(join(process.cwd(),'dist'),join(release,'dist'),{recursive:true});
   await symlink(join(process.cwd(),'node_modules'),join(release,'node_modules'),process.platform==='win32'?'junction':'dir');
   await writeFile(join(home,'install.json'),JSON.stringify({schema:1,type:'git',repository:'/origin',current:'a'.repeat(40),node:process.execPath}));
   const {runUpdateMigrations:migrate}=await import(pathToFileURL(join(release,'src/install/migrations.mjs')));

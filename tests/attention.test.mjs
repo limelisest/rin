@@ -8,7 +8,7 @@ import {
   normalizeAttentionState,
   enqueueAttention,
   prepareDueBatch,
-} from "../src/attention.mjs";
+} from "../dist/attention.js";
 
 const ownerId = "owner-id";
 const now = Date.parse("2026-09-04T12:01:23.000Z");

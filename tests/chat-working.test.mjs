@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChatBridge } from '../src/chat/bridge.mjs';
-import { DEFAULT_WORKING_INTERVAL_MS, resolveWorking, workingFrame } from '../src/chat/working.mjs';
+import { ChatBridge } from '../dist/chat/bridge.js';
+import { DEFAULT_WORKING_INTERVAL_MS, resolveWorking, workingFrame } from '../dist/chat/working.js';
 
 test('working configuration selects frames, text and safe fallbacks',()=>{
   assert.deepEqual(resolveWorking({text:'  自定义处理中...  '}).frames,['  自定义处理中...  ']);

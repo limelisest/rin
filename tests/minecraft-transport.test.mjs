@@ -5,8 +5,8 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Nerve, Store, makeServer, validateConfig } from '../src/nerve.mjs';
-import { MinecraftTransport } from '../src/minecraft-transport.mjs';
+import { Nerve, Store, makeServer, validateConfig } from '../dist/nerve.js';
+import { MinecraftTransport } from '../dist/minecraft-transport.js';
 
 const nerveToken = 'nerve-test-token-abcdefghijklmnopqrstuvwxyz';
 const minecraftToken = 'minecraft-test-token-abcdefghijklmnopqrstuvwxyz';

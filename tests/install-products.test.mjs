@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {access,mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {historySupport,installHistoryTool,installProducts,productSources} from '../src/install/products.mjs';
+import {historySupport,installHistoryTool,installProducts,productSources} from '../dist/install/products.js';
 
 const temp=async t=>{const dir=await mkdtemp(join(tmpdir(),'rin-install-test-'));t.after(()=>rm(dir,{recursive:true,force:true}));return dir;};
 

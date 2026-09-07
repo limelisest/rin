@@ -4,7 +4,7 @@ import {
   DEFAULT_WORKING_TEXT, normalizeAssistantSummaryText, editableIntermediateHeadText, composeEditableMessageText,
   updateEditableMessageSections, markdownToTelegramHtml, telegramHtmlToPlainText,
   normalizeRenderedText, splitPlainText, prepareText,
-} from '../src/chat/presentation.mjs';
+} from '../dist/chat/presentation.js';
 
 test('legacy progress head and three sections retain exact visible separators', () => {
   const initial = updateEditableMessageSections({ kind: 'working', textChunks: [editableIntermediateHeadText(DEFAULT_WORKING_TEXT)] });

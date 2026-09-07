@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { inspectLegacy, disableLegacy } from '../src/install/legacy.mjs';
+import { inspectLegacy, disableLegacy } from '../dist/install/legacy.js';
 async function fixture(t, platform = 'linux') {
   const userHome = await mkdtemp(join(tmpdir(), 'rin-legacy-'));
   t.after(() => rm(userHome, { recursive: true, force: true }));
@@ -98,7 +98,7 @@ test('inaccessible cross-user root retires only this users confirmed legacy laun
 });
 for (const platform of ['linux', 'win32']) test(`${platform}: recognized old launcher can be replaced in the same binDir without importing private settings`, async t => {
   const f = await fixture(t, platform);
-  const { writeLaunchers } = await import('../src/install/setup.mjs');
+  const { writeLaunchers } = await import('../dist/install/setup.js');
   const startup = join(f.userHome, 'Startup/Rin Daemon.cmd');
   const service = platform === 'win32' ? { kind: 'windows-startup', servicePath: startup } : { kind: 'systemd', label: 'rin-daemon-example.service' };
   if (platform === 'win32') await f.put(startup, '@echo off\n');

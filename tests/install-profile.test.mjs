@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import { applyRecommendedCodexProfile, migrateContextManagementConfig, removeObsoleteCodexSettings, RIN_OBSOLETE_CODEX_EDITS, RIN_RECOMMENDED_CODEX_EDITS } from '../src/install/profile.mjs';
+import { applyRecommendedCodexProfile, migrateContextManagementConfig, removeObsoleteCodexSettings, RIN_OBSOLETE_CODEX_EDITS, RIN_RECOMMENDED_CODEX_EDITS } from '../dist/install/profile.js';
 
 test('recommended profile batch-upserts only the reviewed keys',async()=>{
   let request;
@@ -58,7 +58,7 @@ test('a same-named key inside a TOML table is not treated as the managed root ke
 });
 
 test('declining recommendations remains a pure choice with an explicit preservation message',async()=>{
-  const {collectChoices}=await import('../src/install/setup.mjs'); const output=[];
+  const {collectChoices}=await import('../dist/install/setup.js'); const output=[];
   const answers=[[],false,'skip',false,true];
   const ui={intro(){},note(){},outro(){},cancel(){},isCancel(){return false},multiselect:async()=>answers.shift(),confirm:async()=>answers.shift(),select:async()=>answers.shift(),text:async()=>answers.shift(),log:{info:line=>output.push(line),error(){}}};
   const choices=await collectChoices({ui});

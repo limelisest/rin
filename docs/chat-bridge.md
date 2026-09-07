@@ -4,6 +4,7 @@
 
 ```sh
 npm ci
+npm run build
 node src/rin.mjs check /absolute/path/to/private/chat.json
 node src/rin.mjs serve /absolute/path/to/private/chat.json
 node src/rin.mjs status /absolute/path/to/private/chat.json

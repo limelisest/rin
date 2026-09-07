@@ -6,7 +6,7 @@
 
 已取得主仓库 `rinchan-hoshino/rin` 的原始 TypeScript，私有审计副本在 `private/legacy-source`。将 `src/core/chat/rich-text.ts`、`platform/common.ts`、`delivery-policy.ts` 和 `LICENSE` 与 `git show f370ddf80f51:<path>` 逐字节比较，全部相等。完整 commit 为 `f370ddf80f515642513dec650bd0a0cc577d1ffe`。原仓库 LICENSE 为 GNU GPL v3，副本保留原许可。旧部署 JS 的纯函数也已与新版执行比较。
 
-新 `src/chat/presentation.mjs` 从下面纯函数直接剥离，运行时不读取旧安装，也不携带 Pi、节点协议或私人配置：
+新 `src/chat/presentation.ts` 从下面纯函数直接剥离，运行时不读取旧安装，也不携带 Pi、节点协议或私人配置：
 
 | 旧部署 JS 相对源码 | 函数或位置 | 新版用途 |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ Telegram `telegram.js:704` 直接对 HTML 字符串调用 `splitPlainText(...,40
 
 ## Codex 原生附件顺序
 
-`src/chat/files.mjs` 的 `outputParts` 将实际可发送的本地 Markdown 图片/附件链接替换为媒体 part，前后的文字保持原顺序。`outputFiles` 仍提供兼容的去重文件列表。使用旧 `collectMarkdownProtectedRanges` 系列函数及相同版本 marked 的 token 信息；代码围栏、缩进代码、行内代码中的示例链接保留为文字。新版额外识别原生普通 artifact link，并处理 Markdown 自带的空格路径、标题和配对括号，不恢复旧富文本标签。
+`src/chat/files.ts` 的 `outputParts` 将实际可发送的本地 Markdown 图片/附件链接替换为媒体 part，前后的文字保持原顺序。`outputFiles` 仍提供兼容的去重文件列表。使用旧 `collectMarkdownProtectedRanges` 系列函数及相同版本 marked 的 token 信息；代码围栏、缩进代码、行内代码中的示例链接保留为文字。新版额外识别原生普通 artifact link，并处理 Markdown 自带的空格路径、标题和配对括号，不恢复旧富文本标签。
 
 仅允许配置输出根下的真实普通文件，realpath 后再次检查根边界，拒绝符号链接越界及超过 20 MiB 的文件；没有远程下载能力。`tests/chat-files.test.mjs` 四项验证顺序、代码保护、文件边界和媒体 MIME。
 
@@ -60,7 +60,7 @@ Telegram `telegram.js:704` 直接对 HTML 字符串调用 `splitPlainText(...,40
 另外读取旧扩展仓库 `rinchan-hoshino/rin-extensions` 的 `extensions/lark-platform.ts` 和 `extensions/onebot-platform.ts`（本机 HEAD `3c3b14b`），并核对私人旧开发原文。飞书此前虽实现 edit API，却被共享进度逻辑的平台名白名单排除；QQ/OneBot则把没有 `done` 标记的完整公开快照误作增量缓冲。
 
 - 编辑布局现按适配器 `capabilities.edit` 选择。飞书共享静态 Working、最新纯文本摘要、分隔符、quote 分槽、错误保留进度与 final 清理，不再只覆盖 Discord/Telegram。
-- 飞书旧实现发送 `post`，新版此前错误地发送普通 `text`。已将旧纯 Markdown→post 函数直接剥离到 `src/chat/feishu-presentation.mjs`，保留行内样式、链接、代码块、列表 Markdown 和空行，send/edit 使用同一转换；媒体首条也能回复原消息。
+- 飞书旧实现发送 `post`，新版此前错误地发送普通 `text`。已将旧纯 Markdown→post 函数直接剥离到 `src/chat/feishu-presentation.ts`，保留行内样式、链接、代码块、列表 Markdown 和空行，send/edit 使用同一转换；媒体首条也能回复原消息。
 - QQ/OneBot 不支持 edit。完整公开快照立即发送，非 final 以 `... ` 开头，Markdown 用旧纯文本规则降级。相同 item+内容跨重启去重，快照改写用独立新消息，不拿远端消息 ID 调不存在的 edit；真正 delta 仍等完整边界。正文、媒体、正文保持顺序，引用归属冻结至本轮。
 - OneBot 媒体恢复旧扩展的 `image`/`record`/`video` 类型和 `base64://` 上传，避免把 Rin 本机路径交给另一台网关。普通文件使用旧 `upload_private_file`/`upload_group_file` 扩展；这不是所有 v11 实现保证支持的接口，且无法携带 reply segment。失败不会盲目另发回退消息。
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, truncateSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { outputParts, outputFiles } from '../src/chat/files.mjs';
+import { outputParts, outputFiles } from '../dist/chat/files.js';
 
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'rin-files-'));

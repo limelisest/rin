@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {activateNerveMcp} from '../src/install/nerve-service.mjs';
+import {activateNerveMcp} from '../dist/install/nerve-service.js';
 
 async function fixture(t) {
   const home=await mkdtemp(join(tmpdir(),'rin-nerve-activation-'));

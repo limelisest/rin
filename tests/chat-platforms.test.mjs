@@ -399,32 +399,3 @@ test('Discord missing edit resends with reply and no ping but unknown failures d
   assert.equal(sent.length, 2);
   await adapter.stop();
 });
-
-test('Discord attention observes unbound humans across guilds without broadening direct admission', async () => {
-  const client=new EventEmitter();client.user={id:'bot'};client.login=async()=>{};client.isReady=()=>true;client.destroy=async()=>{};
-  const observed=[];let delivered=0;
-  const adapter=discordAdapter({id:'discord',token:'x',allowUsers:['owner'],__client:client},{dataDir:'/tmp',log:{error:assert.fail},isBound:()=>false,observeDiscord:r=>observed.push(r)});
-  await adapter.start(async()=>{delivered++;});
-  const base={id:'1',channelId:'thread',guildId:'guild',content:'ambient',author:{id:'stranger',username:'Person'},channel:{parentId:'channel',parent:{parentId:'mirror-category'}},createdTimestamp:1000,attachments:new Map(),reference:{messageId:'previous'}};
-  client.emit('messageCreate',base);
-  client.emit('messageCreate',{...base,id:'2',author:{id:'another-bot',bot:true}});
-  client.emit('messageCreate',{...base,id:'3',author:{id:'bot'}});
-  await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(delivered,0);assert.equal(observed.length,1);
-  assert.equal(observed[0].disposition,'record_only');assert.equal(observed[0].userId,'stranger');
-  assert.deepEqual(observed[0].ancestorIds,['channel','mirror-category']);assert.equal(observed[0].replyTo,'previous');
-  await adapter.stop();
-});
-
-test('Discord attention records bound messages as actionable and unbound messages without dispatching them', async () => {
-  for (const [bound, disposition, deliveries] of [[true, 'actionable', 1], [false, 'record_only', 0]]) {
-    const client=new EventEmitter();client.user={id:'bot'};client.login=async()=>{};client.isReady=()=>true;client.destroy=async()=>{};
-    const observed=[];let handled=0;
-    const adapter=discordAdapter({token:'x',allowUsers:['owner'],__client:client},{dataDir:'/tmp',log:{error:assert.fail},isBound:async()=>bound,observeDiscord:async record=>observed.push(record)});
-    await adapter.start(async()=>{handled++;});
-    client.emit('messageCreate',{id:`message-${bound}`,channelId:'dm',content:'ordinary message',author:{id:'owner'},attachments:new Map()});
-    await new Promise(resolve=>setImmediate(resolve));
-    assert.equal(observed.length,1);assert.equal(observed[0].disposition,disposition);assert.equal(handled,deliveries);
-    await adapter.stop();
-  }
-});

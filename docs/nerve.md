@@ -1,73 +1,64 @@
-# Nerve
+# Nerve：通用事件投递
 
-Nerve 是新版 Rin 的事件与注意力组件。代码、部署目录及 MCP 都属于 Rin；聊天桥和事件调度是两个独立模块，在安装版的同一个守护进程内运行，不依赖旧 Rin、Pi 或旧 daemon。
+Nerve 只负责持久队列、去重和投递回执。事件生产者决定何时产生事件，目标程序决定如何接收事件。定时规则、Discord 消息策略、游戏协议和个人资料都放在使用者自己的脚本中。
 
-## 单一常驻代理
-
-目标必须是一个已有 Codex 任务，所有事件延续该任务，不按频道分裂会话。支持两个执行方式，配置中只能有一个 Codex 目标：
-
-- `codex-app`：复用 App 接入层的 start/steer、未加载任务自动唤醒及历史观察器。投递串行、完成追踪可重叠；owner 新事件可插入正在执行的轮次，最多16个在途事件。匹配回执 turnId 且观察到 completed 才记 done。失败、超时、断连及不确定回执均不自动重投。当前自动加载入口仅支持 macOS，可能显示对应任务窗口。
-- `codex`：原生 `codex exec resume --json`，事件串行执行，子进程完成后退出。适用于不需要 App 工具的独立任务；不能与 App 抢占同一会话。
-
-普通助手输出不会发送到聊天频道。常驻代理先读原始记录并判断是否有必要行动，外发必须显式调用 `nerve_send_chat`，指定单个目的频道。
-
-## Discord 注意力
-
-启用聊天配置中的 `attention.nerveConfig` 后，沿用原有 Discord Gateway 连接，记录机器人可见的各频道及私聊真人消息；自身及机器人消息不进入注意力。消息先落聊天服务持久发件箱，再通过本机鉴权接口提交到 Nerve，按稳定消息ID去重。
-
-账号和排除项仅在私人配置中。调度只使用持久未读状态、可信平台元数据和 Codex 当前轮次状态，不另起模型判断器：
-
-- owner ID 匹配的普通消息优先级60：空闲时默认等待30秒合批，Codex 正在工作时延至安全边界，最迟5分钟；不能靠消息正文自称 owner取得身份。
-- Discord 提供的真实机器人 mention 优先级100；工作中仍保留30秒安全边界。只有 `nerve_send_chat` 显式设置 `awaitingReply` 后，下一条真人回复才以优先级90处理；普通发送不会自动进入等待，避免自激循环。
-- 其他人默认优先级20，按15分钟固定时间窗口合批，忙碌时仍有15分钟最大延迟。频道可通过 `attention.channels[chatKey]` 调整 `mode`（`normal`/`ambient`）、`idleDelayMs`、`maxDelayMs` 和 `idleOnly`；这些是初始策略，不改变身份判断。
-- 按配置排除笔记、镜像等分类及频道/线程；检查消息的父级链。
-- 已由其他原生入口处理的 actionable 消息不重复刺激。当前启用注意力的 Discord 聊天交给常驻代理；桥命令在独立入口处理，不重复唤醒。
-- 从启用后收到的新消息开始，不回灌旧历史。事件只含频道及消息范围；正文、身份、引用和附件元数据由读取工具按需获取。
-
-记录、真正未读集合、频道注意力状态及事件准入持久化并事务提交。发出注意力事件不会提前清除未读；pending/running 的注意力事件会抑制重复唤醒。只有读取工具实际返回的区间默认标为已阅，分页不会越过本页推进水位。旧版状态在首次读写时迁移。外部内容属于不可信聊天数据，不是系统指令；跨频道共用任务不授权将其他频道或私人资料复制出去。
-
-## MCP 与接口
-
-全新安装和 `rin update` 自动注册/修复 Nerve MCP；新配置使用空 targets/triggers、独立随机令牌和探测到的空闲本机端口。首次加入服务时自动启动并核对鉴权健康接口；已有账号、目标与触发器不被替换。未配置目标时状态和列表工具可用，事件投递及平台工具仍需用户自己的目标和账号配置。
-
-Git 安装生成稳定入口 `<RIN_HOME>/nerve-mcp-run.mjs`。MCP 配置以 Node 运行此入口，并保留 `NERVE_CONFIG` 指向实际配置；不要将 MCP 绑定到某个 `releases/<sha>` 目录。每次新建 MCP 连接时，入口读取 `install.json.current` 并加载该发布的客户端。`rin update` 后，已有连接继续使用原客户端；重连后使用新版，不需要重启聊天守护进程。
-
-`nerve-mcp.mjs` 从 `NERVE_CONFIG` 读取配置，从相邻 `secrets.json` 读取令牌。服务只监听 `127.0.0.1`；手工配置省略端口时使用9761，安装器为新配置选择可用端口。MCP提供14个工具：
-
-- 状态、列出/保存/停用触发器；列出/读取/提交/重试事件。
-- `nerve_read_chat`：按chatKey读取规范记录，可分页，最多200条；`markViewed` 默认 true，只标记返回页。可选 `attentionMode=busy|waiting|idle` 与有界 `attentionForMs`，为当前频道声明一个轻量安全停点；过期后继续采用 Codex 历史中的真实 active 状态。
-- `nerve_send_chat`：向已记录且未排除的Discord目的地发送，稳定ID去重；正文最多2000字符，引用必须属于同频道。仅在确实期待真人回答时设置 `awaitingReply=true`，可用 `awaitingReplyMs` 限定期限。使用现有账号的REST，不开第二条Gateway；不确定发送保留账本，不自动重试。
-
-## Minecraft transport（显式配置，默认关闭）
-
-Minecraft 是同一常驻 persona 的一个本地输入源，不会创建第二个 Codex 任务。启用时，Nerve 以独立 Node transport 轮询游戏模组的 loopback HTTP 服务；游戏消息先在 `stateFile` 中原子持久化，再使用稳定事件 ID `minecraft:<serverId>:<messageId>` 交给已经配置的唯一 `codex` 或 `codex-app` target。ACK 只表示 Nerve 已可靠接手，绝不表示模型或游戏动作完成。进程在发送前崩溃的出站项保留 `uncertain`，不自动重放。
-
-`private/nerve.json` 必须显式加入以下配置；没有这一节即不会开启 Minecraft。同一游戏收件箱中的其他玩家/女仆消息会被跳过并推进游标，不进入规范记录或 persona，也不会阻塞绑定玩家；服务器标识不匹配则停止同步。`source` 是硬锁：`playerUuid` 必须来自目标服务器实际 `ServerPlayer` UUID 的管理员配置，不能以“任意进服玩家”或聊天文字识别主人。`MC_BRIDGE_TOKEN` 与 `NERVE_TOKEN` 是两个不同的随机密钥，前者至少32字符，只用于游戏 loopback 接口，不能放进公开配置。
+## 配置
 
 ```json
 {
-  "minecraft": {
-    "endpoint": "http://localhost:17831/",
-    "stateFile": "state/minecraft-transport.json",
-    "tokenEnv": "MC_BRIDGE_TOKEN",
-    "target": "main",
-    "source": {
-      "serverId": "my-survival-server",
-      "playerUuid": "replace-with-authoritative-serverplayer-uuid",
-      "maidUuid": "replace-with-authoritative-maid-uuid"
+  "database": "events.sqlite",
+  "port": 9761,
+  "scriptsDirectory": "producers",
+  "targets": {
+    "inbox": {
+      "type": "command",
+      "argv": ["node", "/absolute/path/to/inbox.mjs"],
+      "receipt": true,
+      "timeoutMs": 30000
     }
   }
 }
 ```
 
-将 `MC_BRIDGE_TOKEN` 放在同一 private 目录的 `secrets.json`，例如 `{ "NERVE_TOKEN": "…", "MC_BRIDGE_TOKEN": "至少32字符的不同随机值" }`。接口仅接受 `http://localhost`、`127.0.0.1` 或 `[::1]` origin，拒绝重定向、凭据、路径和非 loopback 地址；如游戏服不在本机，只能先建立由操作者维护的安全隧道，并把本地隧道端口作为 endpoint。
+`command` 用 argv 数组启动程序，向 stdin 写入 `{id,payload}`，不经过 shell。普通命令成功退出即表示投递完成；设置 `receipt: true` 时，stdout 必须是 `{accepted:true,...}`。明确未接收的程序可返回 `{accepted:false,retryable:true,error:"..."}`，此时才允许自动重试。命令超时、异常退出或无有效回执默认保留为 `uncertain`。
 
-安装版会按 nerve.json 所在目录解析相对 stateFile；游戏轮询独立执行，离线或超时不会阻塞 Discord 注意力与定时检查。
+`http` 目标向固定 `url` POST 事件 payload，并带 `Idempotency-Key` 事件 ID；可用 `tokenEnv` 指定目的服务的 Bearer token 环境变量。HTTP 成功状态表示目的端接收成功。只有目的端保证幂等时才设置 `idempotent: true`，让失败按有界退避重试。`maxAttempts` 默认 3。
 
-状态锁不会自动删除。启动提示锁已存在时，先运行 `node src/nerve.mjs minecraft-lock private/nerve.json` 并确认记录的 PID 已退出且锁已足够旧，再运行 `node src/nerve.mjs minecraft-recover-lock private/nerve.json`；恢复命令会在删除前再次核对锁内容。
+同一目标的投递串行，不同目标轮转取件，最多 16 个并发投递。进程意外停止时，原先的 `running` 记录变为 `uncertain`，避免重放可能已产生副作用的操作。
 
-MCP 中 `nerve_read_minecraft` 读取规范消息；`nerve_inspect_minecraft` 获取绑定玩家/女仆的实时位置、背包、附近已加载容器/方块和作业；`nerve_send_minecraft` 才会明确发送游戏内聊天或动作。调用方无法提交 player/maid UUID，Node 从所读消息绑定身份。动作可为单个任务或 `script`，脚本是受限大小的 JSON `{version:1,steps:[…]}`，由游戏端做最终语义、权限和预算校验；支持组合移动、交互、容器、等待、说话、变量、条件和跳转步骤。普通 final、思考、工具输出都不会自动转发到游戏。
+**`done` 只代表目的端的接收回执，不代表模型轮次或业务任务完成。** Nerve 不创建、运行、观察或恢复 Codex 任务。
 
-定时触发器仍支持 `everySeconds`、`at`、带时区的 `daily`，三选一。可选 `check` 是可信只读命令，输出 `{ready,key,payload}`，仅ready触发。不恢复未配置的旧业务定时任务。
+## 用户脚本目录
 
-部署服务名称与路径由本地安装决定；运行配置与迁移记录不属于公开源码。
+配置 `scriptsDirectory` 后，服务启动目录顶层的每个 `.mjs` 文件，并在退出后按 2–60 秒退避重启。脚本继承环境，并获得本机 `NERVE_ENDPOINT`、`NERVE_TOKEN`。服务关闭时先通知脚本退出，最多等待 20 秒后终止。
+
+脚本可自行使用官方平台 SDK、定时库或其他事件源。定时游标、平台消息记录和输出工具由脚本自己维护；同一平台账号只应有一个接收者。Nerve 不依赖这些脚本的业务结构。
+
+`dist/nerve-emit.js` 导出 `emitEvent({id,target,payload,source?})`，使用上述环境变量提交事件并核对队列回执；直接运行时从 stdin 读取同样的 JSON。使用稳定事件 ID：同一 ID、目标和 payload 的重投返回已有记录；同一 ID 携带不同内容会被拒绝。
+
+## Codex 输入适配命令
+
+需要向已有 App 任务提交时，可以将目标设为：
+
+```json
+{
+  "type": "command",
+  "argv": ["node", "/absolute/rin/dist/codex-input-command.js", "existing-task-uuid"],
+  "receipt": true,
+  "timeoutMs": 60000
+}
+```
+
+payload 提供 `prompt`。这个独立输入适配命令复用聊天入口的本机 IPC：发现任务、必要时唤醒，空闲时 start、忙时 steer，收到提交回执后退出。它不等待轮次结束，也不转发模型输出。自动唤醒目前只支持 macOS。聊天桥需要的历史观察和公开输出转发仍由聊天桥管理。
+
+## HTTP 与 MCP
+
+所有 HTTP 接口绑定 loopback，必须使用至少 24 字符随机 `NERVE_TOKEN`。`GET /health`、`GET /events`、`GET /events/:id` 用于检查；`POST /events` 提交 `{id,target,payload,source?}`；`POST /events/:id/retry` 显式重试 failed/uncertain 记录。输入上限 1 MiB，目的 target 必须预先配置。
+
+安装器通过稳定入口注册五个 MCP 工具：`nerve_status`、`nerve_list_events`、`nerve_get_event`、`nerve_enqueue_event`、`nerve_retry_event`。已有连接需重连后载入新版工具。全新安装的 targets 为空，不复制任何私人脚本、账号或任务。
+
+## 从旧版迁移
+
+旧版 `triggers`、`attention`、`minecraft` 以及 `codex`／`codex-app` target 不再属于 Nerve 配置。启动前会明确拒绝旧字段，避免静默丢弃业务。先备份并迁移生产者状态，将规则和平台账号移入私有脚本，再改为 command/http 目标。切换时停止旧接收者，保留消息 ID、已读区间、定时游标和不确定发送状态；不能把旧 running 业务当成未执行而盲目重放。
+
+安装器保留已有配置，不自动猜测个人业务如何迁移。平台专用的读写 MCP 如仍需使用，由对应私有服务单独提供。

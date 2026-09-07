@@ -39,10 +39,10 @@ App steer 的成功回执带 `clientUserMessageId`；观察器读到投影中匹
 
 初次接入建立历史基线；之后持久化游标和活动轮状态，避免重启后把旧输出再次发出。未知版本、结构变化和观察错误会停止新投递。App 版本升级后必须重新核对实现并运行相关测试。
 
-Nerve 的 App 执行器使用提交回执里的 turnId 匹配真实完成，最多跟踪16个在途事件；提交串行，等待完成可以重叠。`queued`、`started`、`completed` 是不同的证据，不能互相替代。
+独立的 Codex 输入适配命令在收到 App 提交回执后退出。Nerve 只记录这个接收结果，不追踪模型完成；聊天桥仍自行观察公开输出。`queued`、`started`、`completed` 是不同的证据，不能互相替代。
 
 ## 验证
 
-源码入口：`src/codex-app-ipc.ts`、`src/codex-app-wake.ts`、`src/chat/codex.ts`、`src/codex-app-exec.ts`。
+源码入口：`src/codex-app-ipc.ts`、`src/codex-app-wake.ts`、`src/chat/codex.ts`、`src/codex-input.ts`、`src/codex-input-command.ts`。
 
 测试覆盖分帧、owner 发现、活动/空闲路由、图片输入、超时不重投、未加载任务唤醒、公开输出隔离和游标恢复。已有真实任务的文本 start/steer、活动轮图片输入和一次未加载任务唤醒证据；完整 App 重启后的跨平台往返、各种附件及断网恢复仍需持续验收，见 [能力审计](chat-parity-audit.md)。

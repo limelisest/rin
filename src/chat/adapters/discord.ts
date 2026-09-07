@@ -115,26 +115,6 @@ export function createAdapter(config: DiscordConfig, context: AdapterContext) {
     const recognizedCommand = context.isCommand
       ? Boolean(context.isCommand({text: commandSource}))
       : Boolean(commandMatch && commands.some(command => command.name === commandMatch[1].toLowerCase()));
-    if (!recognizedCommand && context.observeDiscord && message?.author?.id && !message.author.bot && String(message.author.id)!==String(client?.user?.id)) {
-      const ancestorIds: string[]=[];
-      let current: GuildBasedChannel | null | undefined = message.channel && 'parentId' in message.channel ? message.channel : undefined;
-      for(let depth=0;current && depth<4;depth++) {
-        const parentId: string | null = 'parentId' in current ? current.parentId : null;
-        if(!parentId || ancestorIds.includes(String(parentId)))break;
-        ancestorIds.push(String(parentId));
-        current=current.parent || client!.guilds?.cache?.get?.(message.guildId || '')?.channels?.cache?.get?.(parentId);
-        if(!current) {
-          try { current=await client!.guilds?.cache?.get?.(message.guildId || '')?.channels?.fetch?.(parentId); }
-          catch { context.log?.warn?.('discord parent topology unavailable'); }
-        }
-      }
-      const instance=String(client!.user!.id),chatKey=`discord/${instance}:${message.channelId}`;
-      await context.observeDiscord({id:`${chatKey}:${message.id}`,messageId:String(message.id),platform:'discord',platformInstance:instance,adapterId:config.id,
-        chatKey,chatType:message.guildId?'group':'dm',userId:String(message.author.id),authorName:message.member?.displayName || message.author.globalName || message.author.username || '',
-        role:'user',text:String(message.content || ''),receivedAt:new Date(message.createdTimestamp || Date.now()).toISOString(),disposition:bound?'actionable':'record_only',ancestorIds,
-        mentionedBot:Boolean(client?.user?.id && message.mentions?.users?.has?.(client.user.id)),
-        attachments:[...(message.attachments?.values?.() || [])].map(a=>({name:a.name,url:a.url,mimeType:a.contentType})),replyTo:message.reference?.messageId ? String(message.reference.messageId):undefined});
-    }
     if (!incoming || !bound) return;
     if (recognizedCommand) { await handler({...incoming, files: []}); return; }
     const attachments = [];

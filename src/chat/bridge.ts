@@ -14,7 +14,6 @@ import { loadCommandExtensions } from './command-extensions.js';
 import { executeUsage } from './usage.js';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { AttentionClient } from './attention-client.js';
 import { ChatStore, stableId } from './store.js';
 import { allowed, splitText, validateConfig } from './policy.js';
 import { effectivePrivate } from './private-like.js';
@@ -24,7 +23,7 @@ import { resolveWorking, workingFrame } from './working.js';
 import { composeInboundText } from './input-normalization.js';
 
 export class ChatBridge {
-  config: ChatConfig; log: Logger; usage: typeof executeUsage; commands: ChatCommand[]; store: ChatStore; attention: AttentionClient | null;
+  config: ChatConfig; log: Logger; usage: typeof executeUsage; commands: ChatCommand[]; store: ChatStore;
   bindingCreations: Map<string, Promise<Binding>>; codex: CodexBridge; adapterFactory: (config: AdapterConfig, context: AdapterContext) => Promise<ChatAdapter> | ChatAdapter;
   adapters: Map<string, ChatAdapter>; items: Map<string, PublicItem>; finalizedTurns: Set<string>; active: Set<string>; faultedThreads: Set<string>;
   retryAt: Map<string, {at: number; delay: number}>; lastTypingAt: Map<string, number>; working: ReturnType<typeof resolveWorking>;
@@ -36,7 +35,6 @@ export class ChatBridge {
     this.usage = usage;
     this.commands = [];
     this.store = store || new ChatStore(resolve(config.dataDir, 'chat.sqlite'));
-    this.attention = config.attention?.nerveConfig ? new AttentionClient(config.attention.nerveConfig,this.store,{log}) : null;
     if(this.store.cursor('bindings')) this.config.bindings=this.store.cursor<Binding[]>('bindings')!;
     this.config.bindings=[...this.config.bindings];
     for(const entry of Object.values(this.store.cursor<AutoBindings>('auto-bindings') || {})) {
@@ -205,11 +203,8 @@ export class ChatBridge {
         dataDir: this.config.dataDir, log: this.log,
         getCursor: key => this.store.cursor(key),
         setCursor: (key,value) => this.store.setCursor(key,value),
-        observeDiscord: this.attention ? record => this.attention!.observe(record) : undefined,
         commands: this.commands,
         isCommand: message => Boolean(parseCommandText(message.text,this.commands)),
-        // An explicit route is a direct chat bridge.  Attention can suppress only
-        // lazy Discord task creation, never a route the operator deliberately bound.
         isBound: message => Boolean(parseCommandText(message.text,this.commands)) ||
           this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && String(b.topicId || '')===String(message.topicId || '') && b.kind===message.kind) ||
           this.canAutoBind(config,message),
@@ -225,7 +220,6 @@ export class ChatBridge {
     this.timer = setInterval(() => {
       this.submit().catch(e=>this.log.error('submit failed', e));
       this.flush().catch(e=>this.log.error('delivery failed',e));
-      this.attention?.flush().catch(e=>this.log.error('attention forwarding failed',e));
     }, 1000);
     this.typingTimer = setInterval(() => this.typing(), 1000);
     await this.submit();
@@ -256,7 +250,7 @@ export class ChatBridge {
     }
   }
   canAutoBind(config: AdapterConfig,message: ChatMessage) {
-    return Boolean(config.autoBind && !(this.attention && config.type==='discord') &&
+    return Boolean(config.autoBind &&
       !config.autoBind.excludedChatIds?.includes(String(message.chatId)));
   }
   async ensureBinding(config: AdapterConfig,message: ChatMessage) {
@@ -733,11 +727,10 @@ export class ChatBridge {
     for(const {timer} of this.workingTimers.values())clearInterval(timer);
     this.workingTimers.clear();
     await Promise.allSettled(this.config.bindings.filter(binding=>this.adapters.has(binding.adapter)).flatMap(binding=>Object.keys(this.presentations(binding).entries).map(id=>this.endReaction(binding,id))));
-    this.attention?.stop();
     await Promise.allSettled([...this.adapters.values()].map(a=>a.stop()));
     await this.codex.stop();
     const deadline = Date.now()+15000;
-    while ((this.flushing || this.submittingThreads.size || this.attention?.busy || this.bindingCreations.size) && Date.now()<deadline) await new Promise(r=>setTimeout(r,50));
-    if (!this.flushing && !this.submittingThreads.size && !this.attention?.busy && !this.bindingCreations.size) this.store.close();
+    while ((this.flushing || this.submittingThreads.size || this.bindingCreations.size) && Date.now()<deadline) await new Promise(r=>setTimeout(r,50));
+    if (!this.flushing && !this.submittingThreads.size && !this.bindingCreations.size) this.store.close();
   }
 }

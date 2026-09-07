@@ -66,7 +66,7 @@ export async function ensureNerveMcp({home,codexHome,node=process.execPath,binar
   let config=await readOptional(configPath);
   const initialized=config===undefined;
   if(initialized && (daemonNerve || envPath))throw new Error('Configured Nerve file is missing; refusing to replace it');
-  if(initialized)config={database:'nerve.sqlite',port:await availablePort(),targets:{},triggers:[]};
+  if(initialized)config={database:'nerve.sqlite',port:await availablePort(),targets:{}};
   config=object(config,'Nerve configuration');
   object(config.targets,'Nerve targets');
   validateConfig(config);

@@ -31,7 +31,7 @@ async function fixture(t) {
 const json=async file=>JSON.parse(await readFile(file,'utf8'));
 async function existing(f,extra={}) {
   const configPath=join(f.privateDir,'nerve.json');
-  await writeFile(configPath,JSON.stringify({database:'custom.sqlite',port:19873,targets:{},triggers:[],...extra}));
+  await writeFile(configPath,JSON.stringify({database:'custom.sqlite',port:19873,targets:{},...extra}));
   await writeFile(join(f.privateDir,'secrets.json'),JSON.stringify({NERVE_TOKEN:'x'.repeat(32),OTHER:'keep'}));
   return configPath;
 }
@@ -42,7 +42,7 @@ test('fresh installation initializes idle Nerve and preserves other daemon and s
   await writeFile(join(f.privateDir,'secrets.json'),JSON.stringify({OTHER:'keep'}));
   const result=await ensureNerveMcp(f.options),config=await json(result.configPath);
   assert.equal(result.initialized,true);assert.equal(result.needsActivation,true);
-  assert.deepEqual(config.targets,{});assert.deepEqual(config.triggers,[]);
+  assert.deepEqual(config.targets,{});assert.equal('triggers' in config,false);
   assert.ok(config.port>0 && config.port<=65535);
   assert.deepEqual(await json(join(f.privateDir,'daemon.json')),{chat:'chat.json',custom:42,nerve:result.configPath});
   const secrets=await json(join(f.privateDir,'secrets.json'));

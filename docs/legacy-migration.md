@@ -45,7 +45,7 @@ For the [chat bridge](chat-bridge.md):
 
 Platform identities are not interchangeable. QQ Official Bot uses its own OpenID model. OneBot v11 uses the identity values supplied by its gateway. QQ Official Bot and OneBot v11 are separate required adapters with separate configuration and acceptance tests; OneBot does not imply any particular gateway implementation.
 
-For [Nerve](nerve.md), recreate only the selected triggers, destinations, exclusions, and attention rules. Do not restore old scheduled work merely because a definition exists. Choose one current Codex target mode and ensure it does not compete with another process for the same session. Keep remote administrative capabilities disabled unless they are specifically required and authorized.
+For [Nerve](nerve.md), recreate only selected event producers in private scripts and configure command/http destinations. Keep schedules, exclusions and attention rules inside the producer. Do not restore old scheduled work merely because a definition exists. An optional Codex input command submits to an existing App task and exits at admission; it must not compete with another execution owner. Keep remote administrative capabilities disabled unless they are specifically required and authorized.
 
 ## 4. Validate before cutover
 

@@ -48,6 +48,18 @@ test('different channels create independent tasks and explicit bindings win',asy
  let creates=0;const f=fixture(t,async()=>`task-${++creates}`);f.config.bindings.push({adapter:'discord',chatId:'existing',kind:'group',threadId:'existing-task',mirror:true});const b=f.make();await b.start();
  try{for(const ch of ['a','b','existing'])await b.receive(f.config.adapters[0],message(ch));await b.submit();assert.equal(creates,2);assert.deepEqual(new Set(f.queue.map(x=>x.id)),new Set(['task-1','task-2','existing-task']));}finally{await b.stop();}
 });
+test('Discord explicit bindings remain direct when attention is enabled',async t=>{
+ const f=fixture(t,async()=>assert.fail('attention must not create a lazy binding'));
+ f.config.bindings.push({adapter:'discord',chatId:'direct',kind:'group',threadId:'direct-task',mirror:true});
+ const b=f.make();
+ // Keep this unit test local: only the routing distinction matters here.
+ b.attention={busy:false,flush:async()=>{},stop(){}};
+ await b.start();
+ try {
+  assert.equal(f.contexts[0].isBound(message('direct')),true);
+  assert.equal(f.contexts[0].isBound(message('unbound')),false);
+ } finally { await b.stop(); }
+});
 test('uncertain creation is durable and is not replayed after restart',async t=>{
  let creates=0;const f=fixture(t,async()=>{creates++;throw Error('timeout');});let b=f.make();await b.start();
  try{await b.receive(f.config.adapters[0],message('x'));await b.stop();b=f.make();await b.start();await b.receive(f.config.adapters[0],message('x','2'));assert.equal(creates,1);assert.equal(f.queue.length,0);}finally{await b.stop();}

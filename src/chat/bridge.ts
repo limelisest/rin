@@ -75,7 +75,11 @@ export class ChatBridge {
         observeDiscord: this.attention ? record => this.attention!.observe(record) : undefined,
         commands: this.commands,
         isCommand: message => Boolean(parseCommandText(message.text,this.commands)),
-        isBound: message => Boolean(parseCommandText(message.text,this.commands)) || (!(this.attention && config.type==='discord') && (this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind) || this.canAutoBind(config,message))),
+        // An explicit route is a direct chat bridge.  Attention can suppress only
+        // lazy Discord task creation, never a route the operator deliberately bound.
+        isBound: message => Boolean(parseCommandText(message.text,this.commands)) ||
+          this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind) ||
+          this.canAutoBind(config,message),
       });
       this.adapters.set(config.id, adapter);
 

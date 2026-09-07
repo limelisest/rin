@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { prepareRelease, switchRelease, withInstallLock } from '../src/install/core.mjs';
+import { prepareRelease, switchRelease, withInstallLock, run } from '../src/install/core.mjs';
 import { writeLaunchers } from '../src/install/setup.mjs';
 import { routeArgs } from '../src/cli.mjs';
 
@@ -226,4 +226,16 @@ test('stable launchers load the selected release, pass argv, and gracefully stop
   assert.equal(await readFile(stopMarker, 'utf8'), 'stopped');
   await assert.rejects(readFile(join(home, 'private/daemon-ready.json')), { code: 'ENOENT' });
   });
+});
+
+
+test('captured command failures include stdout diagnostics and stderr after streams close', async () => {
+  await assert.rejects(run(process.execPath, ['-e', "console.log('TEST_FAILURE_ON_STDOUT'); console.error('STDERR_DETAIL'); process.exitCode=1"], {capture: true}), error => {
+    assert.match(error.message, /TEST_FAILURE_ON_STDOUT/);
+    assert.match(error.message, /STDERR_DETAIL/);
+    assert.match(error.message, /failed \(1\)/);
+    return true;
+  });
+  const result = await run(process.execPath, ['-e', "process.stdout.write('x'.repeat(200000))"], {capture: true});
+  assert.equal(result.stdout.length, 200000);
 });

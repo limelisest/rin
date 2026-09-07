@@ -56,7 +56,11 @@ export async function run(command, args, options = {}) {
     child.stdout?.on('data', b => { stdout += b; });
     child.stderr?.on('data', b => { stderr += b; });
     child.once('error', reject);
-    child.once('exit', (code, signal) => code === 0 || allowFailure ? accept({ code, signal, stdout, stderr }) : reject(new Error(`${command} failed (${signal || code})${capture ? `: ${stderr.trim()}` : ''}`)));
+    child.once('close', (code, signal) => {
+      const detail = capture ? [stdout.trim(), stderr.trim()].filter(Boolean).join('\n').slice(-16000) : '';
+      if (code === 0 || allowFailure) accept({ code, signal, stdout, stderr });
+      else reject(new Error(`${command} failed (${signal || code})${detail ? `:\n${detail}` : ''}`));
+    });
   });
 }
 export async function atomicJSON(path, data) {

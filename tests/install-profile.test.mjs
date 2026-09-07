@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import { applyRecommendedCodexProfile, removeObsoleteCodexSettings, RIN_OBSOLETE_CODEX_EDITS, RIN_RECOMMENDED_CODEX_EDITS } from '../src/install/profile.mjs';
+import { applyRecommendedCodexProfile, migrateContextManagementConfig, removeObsoleteCodexSettings, RIN_OBSOLETE_CODEX_EDITS, RIN_RECOMMENDED_CODEX_EDITS } from '../src/install/profile.mjs';
 
 test('recommended profile batch-upserts only the reviewed keys',async()=>{
   let request;
@@ -63,4 +63,75 @@ test('declining recommendations remains a pure choice with an explicit preservat
   const ui={intro(){},note(){},outro(){},cancel(){},isCancel(){return false},multiselect:async()=>answers.shift(),confirm:async()=>answers.shift(),select:async()=>answers.shift(),text:async()=>answers.shift(),log:{info:line=>output.push(line),error(){}}};
   const choices=await collectChoices({ui});
   assert.equal(choices.recommendations,false);assert.match(output.join('\n'),/Existing Codex settings will be preserved/);
+});
+
+for(const value of [true,false]) {
+  test(`context management migration preserves boolean ${value}`,async t=>{
+    const codexHome=await mkdtemp(join(tmpdir(),'rin-context-migration-'));
+    t.after(()=>rm(codexHome,{recursive:true,force:true}));
+    await writeFile(join(codexHome,'config.toml'),`[features]\ncontext_management = ${value}\n`);
+    const filePath=await realpath(join(codexHome,'config.toml'));
+    let request;
+    const result=await migrateContextManagementConfig({codexHome,
+      readConfig:async params=>{
+        assert.deepEqual(params,{includeLayers:true});
+        return{config:{features:{context_management:!value}},layers:[
+          {name:{type:'user',file:filePath},version:'original',config:{features:{context_management:value,memories:true}}},
+        ]};
+      },
+      writeConfig:async params=>{request=params;return{status:'ok'};},
+    });
+    assert.equal(result.status,'migrated');
+    assert.deepEqual(request,{
+      edits:[{keyPath:'features.context_management',value:{experimental_mode:value},mergeStrategy:'replace'}],
+      filePath,expectedVersion:'original',reloadUserConfig:true,
+    });
+  });
+}
+
+test('context migration skips absent files and keys without invoking Codex',async t=>{
+  const codexHome=await mkdtemp(join(tmpdir(),'rin-context-absent-'));
+  t.after(()=>rm(codexHome,{recursive:true,force:true}));
+  const unexpected=async()=>{assert.fail('Codex must not be invoked');};
+  const options={codexHome,resolveCommand:unexpected,writeConfig:unexpected,readConfig:unexpected};
+  assert.deepEqual(await migrateContextManagementConfig(options),{status:'unchanged'});
+  await writeFile(join(codexHome,'config.toml'),'[features]\nmemories = true\n');
+  assert.deepEqual(await migrateContextManagementConfig(options),{status:'unchanged'});
+});
+
+test('context migration leaves tables, profiles and non-user layers untouched',async t=>{
+  const codexHome=await mkdtemp(join(tmpdir(),'rin-context-scopes-'));
+  t.after(()=>rm(codexHome,{recursive:true,force:true}));
+  await writeFile(join(codexHome,'config.toml'),'# context_management\n');
+  const filePath=await realpath(join(codexHome,'config.toml'));
+  for(const config of [
+    {features:{context_management:{experimental_mode:false,extra:true}}},
+    {profiles:{work:{features:{context_management:true}}}},
+    {},
+  ]) {
+    const result=await migrateContextManagementConfig({codexHome,
+      readConfig:async()=>({layers:[
+        {name:{type:'system',file:'/etc/codex/config.toml'},config:{features:{context_management:true}}},
+        {name:{type:'user',file:filePath,profile:'work'},config:{features:{context_management:true}}},
+        {name:{type:'user',file:filePath},version:'v',config},
+      ]}),
+      writeConfig:async()=>{assert.fail('must not write');},
+    });
+    assert.deepEqual(result,{status:'unchanged'});
+  }
+});
+
+test('context migration refuses missing user layer and propagates concurrent write failures',async t=>{
+  const codexHome=await mkdtemp(join(tmpdir(),'rin-context-invalid-'));
+  t.after(()=>rm(codexHome,{recursive:true,force:true}));
+  await writeFile(join(codexHome,'config.toml'),'[features]\ncontext_management = true\n');
+  const filePath=await realpath(join(codexHome,'config.toml'));
+  await assert.rejects(migrateContextManagementConfig({codexHome,
+    readConfig:async()=>({config:{features:{context_management:true}},layers:[]}),
+    writeConfig:async()=>{assert.fail('must not write');},
+  }),/base user configuration layer/);
+  await assert.rejects(migrateContextManagementConfig({codexHome,
+    readConfig:async()=>({layers:[{name:{type:'user',file:filePath},version:'stale',config:{features:{context_management:true}}}]}),
+    writeConfig:async params=>{assert.equal(params.expectedVersion,'stale');throw new Error('version conflict');},
+  }),/version conflict/);
 });

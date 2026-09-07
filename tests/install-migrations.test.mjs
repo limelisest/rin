@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,realpath,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {RIN_LEGACY_SUBAGENT_INSTRUCTIONS,RIN_SUBAGENT_INSTRUCTIONS} from '../src/install/instructions.mjs';
@@ -15,7 +15,7 @@ test('ordinary update runs managed migrations without applying the recommended p
   await writeFile(join(codexHome,'config.toml'),'model_auto_compact_token_limit = 120000\n');
   let request;
   const result=await runUpdateMigrations({codexHome,writeConfig:async value=>{request=value;return{ok:true};}});
-  assert.deepEqual(result,{agentsChanged:true,obsoleteConfigRemoved:true});
+  assert.deepEqual(result,{agentsChanged:true,obsoleteConfigRemoved:true,contextManagementMigrated:false});
   assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),`Personal preface.\n\n${RIN_SUBAGENT_INSTRUCTIONS}\n`);
   assert.deepEqual(request.edits,[{keyPath:'model_auto_compact_token_limit',value:null,mergeStrategy:'upsert'}]);
 });
@@ -66,4 +66,21 @@ test('rin update runs the verified candidate migration before switching releases
     switchTo:async(_home,candidate)=>events.push(['switch',candidate.sha]),
   }),0);
   assert.deepEqual(events,[['migrate',{source:'candidate'}],['switch',next]]);
+});
+
+
+test('update migrates the legacy context flag without applying other recommendations', async t=>{
+  const codexHome=await mkdtemp(join(tmpdir(),'rin-update-context-'));
+  t.after(()=>rm(codexHome,{recursive:true,force:true}));
+  const file=join(codexHome,'config.toml');
+  await writeFile(file,'[features]\ncontext_management = false\n');
+  const filePath=await realpath(file);
+  const requests=[];
+  const result=await runUpdateMigrations({codexHome,
+    readConfig:async()=>({layers:[{name:{type:'user',file:filePath},version:'v1',config:{features:{context_management:false}}}]}),
+    writeConfig:async request=>{requests.push(request);return{status:'ok'};},
+  });
+  assert.equal(result.contextManagementMigrated,true);
+  assert.equal(requests.length,1);
+  assert.deepEqual(requests[0].edits,[{keyPath:'features.context_management',value:{experimental_mode:false},mergeStrategy:'replace'}]);
 });

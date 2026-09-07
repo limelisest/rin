@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import {readFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {readFile,realpath} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
 import {codexCommand} from './core.mjs';
 
 export const RIN_RECOMMENDED_CODEX_EDITS = Object.freeze([
@@ -35,7 +35,7 @@ function hasObsoleteRootSetting(source) {
 
 export function createCodexConfigWriter({ command, codexHome, spawnImpl = spawn, timeoutMs = 15_000 }) {
   if(!command?.command)throw new TypeError('Codex command is required');
-  return async params => new Promise((resolve,reject)=>{
+  return async (params,method = 'config/batchWrite') => new Promise((resolve,reject)=>{
     const env=codexHome?{...process.env,CODEX_HOME:codexHome}:process.env;
     const child=spawnImpl(command.command,[...(command.args || []),'app-server','--stdio'],{env,stdio:['pipe','pipe','pipe']});
     let buffer='',settled=false,nextId=1;
@@ -63,7 +63,7 @@ export function createCodexConfigWriter({ command, codexHome, spawnImpl = spawn,
     (async()=>{
       try{
         await request('initialize',{clientInfo:{name:'rin-installer',title:'Rin installer',version:'1'},capabilities:{experimentalApi:true,requestAttestation:false}});
-        finish(null,await request('config/batchWrite',params));
+        finish(null,await request(method,params));
       }catch(error){finish(error);}
     })();
   });
@@ -76,6 +76,33 @@ export async function applyRecommendedCodexProfile({ codexHome, command, writeCo
     edits:RIN_RECOMMENDED_CODEX_EDITS.map(edit=>({...edit})),
     reloadUserConfig:true,
   });
+}
+
+export async function migrateContextManagementConfig({ codexHome, command, writeConfig, readConfig, binary, resolveCommand = codexCommand } = {}) {
+  if(!codexHome)throw new TypeError('codexHome is required');
+  let filePath=resolve(codexHome,'config.toml');
+  let source;
+  try { source=await readFile(filePath,'utf8'); }
+  catch(error) { if(error.code==='ENOENT')return{status:'unchanged'};throw error; }
+  // This is only a fast path; Codex parses TOML and identifies the user layer below.
+  if(!source.includes('context_management'))return{status:'unchanged'};
+  filePath=await realpath(filePath);
+  const resolved=command || (readConfig && writeConfig ? undefined : await resolveCommand({binary,env:{...process.env,CODEX_HOME:codexHome}}));
+  const client=readConfig && writeConfig ? undefined : createCodexConfigWriter({command:resolved,codexHome});
+  const reader=readConfig || (params=>client(params,'config/read'));
+  const writer=writeConfig || client;
+  const snapshot=await reader({includeLayers:true});
+  const layer=snapshot.layers?.find(layer=>layer.name?.type==='user' && !layer.name.profile && layer.name.file===filePath);
+  if(!layer)throw new Error('Codex did not return the base user configuration layer');
+  const value=layer.config?.features?.context_management;
+  if(typeof value!=='boolean')return{status:'unchanged'};
+  const result=await writer({
+    edits:[{keyPath:'features.context_management',value:{experimental_mode:value},mergeStrategy:'replace'}],
+    filePath,
+    expectedVersion:layer.version,
+    reloadUserConfig:true,
+  });
+  return{status:'migrated',result};
 }
 
 export async function removeObsoleteCodexSettings({ codexHome, command, writeConfig, binary, resolveCommand = codexCommand } = {}) {

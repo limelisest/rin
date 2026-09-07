@@ -70,3 +70,8 @@ Optional FFF setup pins [upstream release v0.10.6](https://github.com/dmtrKovale
 ## Verification limits
 
 Automated checks cover real temporary Git repositories, rejected history rewrites, candidate failure, rollback, stable launcher execution, daemon lifecycle, manager command generation, and product selection/checksums. Fixtures never register real services or install products on the host. macOS/Linux/Windows installer branches do not all have real-machine acceptance evidence. Codex App IPC retains its separate version and platform constraints; installing a desktop app does not prove end-to-end chat delivery.
+
+
+### Context management 配置迁移
+
+`rin update` 将用户配置中 `[features]` 下的 `context_management = true/false` 转为 `context_management = { experimental_mode = true/false }`，保留原有开关值。缺失的设置和已经使用配置表的设置保持原样；更新不会因此重新应用整套推荐配置。此迁移使用 Codex 的配置接口，版本已是最新时也会检查。

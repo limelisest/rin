@@ -90,7 +90,7 @@ export class CodexAppIpc {
     this.stopped = false;
   }
 
-  async steer(threadId: string, { text, cwd, files = [], start = false }: MessageInput = {}) {
+  async steer(threadId: string, { text, cwd, files = [], start = false, onClientMessageId }: MessageInput = {}) {
     if (this.stopped) throw new Error('CodexAppIpc stopped');
     const conversationId = requiredText(threadId, 'threadId');
     const workingDirectory = requiredText(cwd, 'cwd');
@@ -214,6 +214,7 @@ export class CodexAppIpc {
           }
           ownerId = owner.handledByClientId;
           const messageId = randomUUID();
+          onClientMessageId?.(messageId);
           const method = start ? 'thread-follower-start-turn' : 'thread-follower-steer-turn';
           const params = start ? {
             conversationId,

@@ -241,6 +241,25 @@ test('read-only observer baselines history and emits only new public output and 
   await bridge.stop();
 });
 
+test('observer projects the persisted steer input client id and immutable rollout ordinal before later output', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'rin-codex-steer-boundary-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const db = historyFixture(dir);t.after(() => db.close());
+  db.prepare('INSERT INTO thread_turns VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-one', 'physical', 1, 'inProgress', null, 1, null);
+  const events=[];const bridge=new CodexBridge({command:['codex'],codexHome:dir,pollMs:10,onEvent:event=>events.push(event)});
+  await bridge.start();bridge.watch('thread-one');await new Promise(resolve=>setTimeout(resolve,30));
+  // The old output is discovered after the receipt boundary in wall-clock time,
+  // but its creation ordinal proves it belongs before the steered input.
+  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('thread-one','physical','old',10,10,JSON.stringify({type:'agentMessage',text:'old',phase:'final_answer'}),'agentMessage',30);
+  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('thread-one','physical','input-b',20,20,JSON.stringify({type:'userMessage',id:'input-b',clientId:'steer-receipt'}),'userMessage',31);
+  db.prepare('INSERT INTO thread_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('thread-one','physical','new',21,21,JSON.stringify({type:'agentMessage',text:'new',phase:'final_answer'}),'agentMessage',32);
+  await waitFor(()=>events.filter(event=>event.type!=='started').length===3);
+  assert.deepEqual(events.filter(event=>event.type!=='started').map(event=>[event.type,event.itemId,event.ordinal,event.clientMessageId,event.text]),[
+    ['text','old',10,undefined,'old'],['input','input-b',20,'steer-receipt',undefined],['text','new',21,undefined,'new'],
+  ]);
+  await bridge.stop();
+});
+
 test('observer rejects unsupported history schema and stop disables watch', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'rin-codex-history-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -461,7 +480,7 @@ test('observer emits completed image artifacts without exposing image payload or
   const path=join(dir,'generated_images','thread-one','image.png');
   db.prepare('UPDATE thread_items SET item_json=?,updated_at_ordinal=4 WHERE item_id=?').run(JSON.stringify({status:'completed',savedPath:path,result:'private pixels',revisedPrompt:'private prompt'}),'image');
   await waitFor(()=>events.some(e=>e.type==='image'));
-  assert.deepEqual(events.filter(e=>e.type==='image'),[{threadId:'thread-one',turnId:'image-turn',type:'image',itemId:'image',path}]);
+  assert.deepEqual(events.filter(e=>e.type==='image'),[{threadId:'thread-one',turnId:'image-turn',type:'image',itemId:'image',path,ordinal:2}]);
   assert.equal(JSON.stringify(events).includes('private'),false);
   await bridge.stop();bridge=new CodexBridge(options);await bridge.start();bridge.watch('thread-one');
   await new Promise(r=>setTimeout(r,35));await bridge.stop();

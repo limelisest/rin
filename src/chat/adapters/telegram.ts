@@ -6,12 +6,14 @@ interface TelegramConfig extends AdapterConfig {
 type FileDescriptor = {id: string; name?: string; mimeType?: string};
 type MediaField = 'animation' | 'photo' | 'video' | 'voice' | 'audio' | 'document';
 import type { AdapterConfig, AdapterContext, ChatAdapter, ChatMessage, ChatTarget, ChatOutput, ChatCommand, FileAttachment } from '../types.js';
+import type { InboundMedia, ReplyContext } from '../input-normalization.js';
 import { platformError } from './types.js';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {telegramHtmlToPlainText} from '../presentation.js';
-import {admitted} from '../policy.js';
+import {admitted, allowed} from '../policy.js';
+import {privateLikeFromProof, shouldProbePrivateLike} from '../private-like.js';
 import {COMMANDS,parseCommand,registerCommands} from '../commands.js';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -36,7 +38,7 @@ function fileDescriptor(message: Message): FileDescriptor | null {
 }
 
 export function normalizeTelegramUpdate(update: Update, config: TelegramConfig, bot: {id?: string | number; username?: string} = {}, commands = COMMANDS): (ChatMessage & {descriptor: FileDescriptor | null}) | null {
-  const message = update?.message;
+  const message = (update as any)?.message || (update as any)?.edited_message || (update as any)?.edited_channel_post;
   if (!message || message.from?.is_bot) return null;
   const userId = String(message.from?.id || '');
   const kind = message.chat?.type === 'private' ? 'dm' : 'group';
@@ -65,8 +67,23 @@ export function normalizeTelegramUpdate(update: Update, config: TelegramConfig, 
   const recognizedCommand = Boolean(parseCommand(text,commands,commandTarget));
   if (!userId || !admitted({...config,type:'telegram'},userId,kind,{command:recognizedCommand})) return null;
   if (kind === 'group' && (config.requireMention ?? true) && !mentioned && !recognizedCommand) return null;
-  return {id: String(message.message_id), chatId: String(message.chat.id), userId, kind, mentioned,
-    text: text.trim(), replyTo: message.reply_to_message?.message_id ? String(message.reply_to_message.message_id) : undefined,
+  const quoted = message.reply_to_message as Message | undefined;
+  const quoteDescriptor = quoted ? fileDescriptor(quoted) : null;
+  const quoteMedia: InboundMedia[] = quoteDescriptor ? [{
+    kind: quoted?.voice ? 'voice' : quoted?.audio ? 'audio' : quoted?.video ? 'video' : quoted?.sticker ? 'sticker' : quoteDescriptor.mimeType?.startsWith('image/') ? 'image' : 'file',
+    ...(quoteDescriptor.name ? {name: quoteDescriptor.name} : {}), ...(quoteDescriptor.mimeType ? {mimeType: quoteDescriptor.mimeType} : {}),
+    unavailable: 'quoted attachment was not downloaded',
+  }] : [];
+  const reply: ReplyContext | undefined = quoted?.message_id ? {
+    messageId: String(quoted.message_id),
+    ...(quoted.from?.id ? {authorId: String(quoted.from.id)} : {}),
+    ...(quoted.from?.username ? {authorName: quoted.from.username} : {}),
+    ...(quoted.text || quoted.caption ? {text: String(quoted.text || quoted.caption)} : {}),
+    ...(quoteMedia.length ? {media: quoteMedia} : {}),
+    ...(!(quoted.text || quoted.caption || quoteMedia.length) ? {unavailable: true} : {}),
+  } : undefined;
+  return {id: String(message.message_id), chatId: String(message.chat.id), ...(message.message_thread_id ? {topicId: String(message.message_thread_id)} : {}), ...(((update as any)?.edited_message || (update as any)?.edited_channel_post) ? {edited: true} : {}), userId, kind, mentioned,
+    text: text.trim(), replyTo: quoted?.message_id ? String(quoted.message_id) : undefined, ...(reply ? {reply} : {}),
     ...(commandTarget ? {commandTarget} : {}),
     descriptor: fileDescriptor(message)};
 }
@@ -125,12 +142,49 @@ export function createAdapter(config: TelegramConfig, context: AdapterContext) {
   }
 
   async function process(update: Update) {
-    const incoming = normalizeTelegramUpdate(update, config, bot, commands);
+    // Parse and authenticate the sender before any membership or media API
+    // request. Group policy is applied below after the optional proof.
+    const incoming = normalizeTelegramUpdate(update, {...config, dmOnly: false, requireMention: false}, bot, commands);
     if (!incoming) return;
     const {descriptor, ...value} = incoming;
-    if (context.isBound && !await context.isBound(value)) return;
+    const privateLike = await provePrivateLike(value);
+    const envelope = privateLike ? {...value, privateLike: true} : value;
+    if (!allowed(config, envelope, {command: Boolean(parseCommand(envelope.text, commands, envelope.commandTarget))})) return;
+    if (context.isBound && !await context.isBound(envelope)) return;
     const files = await download(descriptor);
-    await onMessage({...value, files});
+    await onMessage({...envelope, files});
+  }
+
+  function presentMember(value: any) {
+    const status = String(value?.status || '').toLowerCase();
+    if (['left', 'kicked', 'banned'].includes(status)) return false;
+    return ['creator', 'administrator', 'member'].includes(status) ||
+      (status === 'restricted' && value?.is_member === true);
+  }
+
+  async function provePrivateLike(message: ChatMessage) {
+    if (!shouldProbePrivateLike(config, message)) return false;
+    try {
+      const selfId = String(bot.id || '');
+      if (!selfId) return privateLikeFromProof(config, message, {complete: false});
+      const chatId = Number(message.chatId);
+      const senderId = Number(message.userId);
+      const botId = Number(selfId);
+      if (!Number.isSafeInteger(chatId) || !Number.isSafeInteger(senderId) || !Number.isSafeInteger(botId)) return privateLikeFromProof(config, message, {complete: false});
+      const count = Number(await call('getChatMemberCount', {chat_id: chatId}));
+      if (count !== 2) return privateLikeFromProof(config, message, {complete: true, privateLike: false});
+      const [sender, self] = await Promise.all([
+        call('getChatMember', {chat_id: chatId, user_id: senderId}),
+        call('getChatMember', {chat_id: chatId, user_id: botId}),
+      ]);
+      const proof = presentMember(sender) && presentMember(self) &&
+        String((self as any)?.user?.id || '') === selfId && (self as any)?.user?.is_bot === true
+        ? {complete: true as const, nonAgentUserIds: [message.userId]}
+        : {complete: true as const, privateLike: false as const};
+      return privateLikeFromProof(config, message, proof);
+    } catch {
+      return privateLikeFromProof(config, message, {complete: false});
+    }
   }
 
   async function poll() {
@@ -138,7 +192,7 @@ export function createAdapter(config: TelegramConfig, context: AdapterContext) {
     while (running) {
       abort = new AbortController();
       try {
-        const updates = await call('getUpdates', {offset, timeout: 25, limit: 100, allowed_updates: ['message']}, abort.signal);
+        const updates = await call('getUpdates', {offset, timeout: 25, limit: 100, allowed_updates: ['message','edited_message','edited_channel_post']}, abort.signal);
         for (const update of updates || []) {
           await process(update);
           const next = Number(update.update_id) + 1;
@@ -179,8 +233,9 @@ export function createAdapter(config: TelegramConfig, context: AdapterContext) {
     async stop() { running = false; abort?.abort(); await pollPromise; pollPromise = undefined; },
     async send(target: ChatTarget, output: ChatOutput): Promise<{id: string}> {
       const chat_id = target.chatId;
+      const topic = target.topicId ? {message_thread_id: Number(target.topicId)} : {};
       const reply = output.replyTo ? {reply_parameters: {message_id: Number(output.replyTo), allow_sending_without_reply: true}} : {};
-      const textPayload = {chat_id, text: String(output.text || ''), ...(output.parseMode === 'HTML' ? {parse_mode: 'HTML' as const} : {})};
+      const textPayload = {chat_id, ...topic, text: String(output.text || ''), ...(output.parseMode === 'HTML' ? {parse_mode: 'HTML' as const} : {})};
       // Only a confirmed entity-parser rejection can safely trigger a plain-text resend.
       const textCall = async (method: 'sendMessage' | 'editMessageText', payload: Parameters<RawApi['sendMessage']>[0] & {message_id?: number}) => {
         try { return await call(method, payload); }
@@ -219,12 +274,12 @@ export function createAdapter(config: TelegramConfig, context: AdapterContext) {
         const sendFile = (nextField: MediaField) => {
           const media = InputFile ? new InputFile(file.path, file.name) : file.path;
           switch(nextField) {
-            case 'animation': return call('sendAnimation', {chat_id, animation: media, ...reply});
-            case 'photo': return call('sendPhoto', {chat_id, photo: media, ...reply});
-            case 'video': return call('sendVideo', {chat_id, video: media, ...reply});
-            case 'voice': return call('sendVoice', {chat_id, voice: media, ...reply});
-            case 'audio': return call('sendAudio', {chat_id, audio: media, ...reply});
-            case 'document': return call('sendDocument', {chat_id, document: media, ...reply});
+            case 'animation': return call('sendAnimation', {chat_id, ...topic, animation: media, ...reply});
+            case 'photo': return call('sendPhoto', {chat_id, ...topic, photo: media, ...reply});
+            case 'video': return call('sendVideo', {chat_id, ...topic, video: media, ...reply});
+            case 'voice': return call('sendVoice', {chat_id, ...topic, voice: media, ...reply});
+            case 'audio': return call('sendAudio', {chat_id, ...topic, audio: media, ...reply});
+            case 'document': return call('sendDocument', {chat_id, ...topic, document: media, ...reply});
           }
         };
         let fileResult;
@@ -241,7 +296,7 @@ export function createAdapter(config: TelegramConfig, context: AdapterContext) {
       if (!result) throw new Error('telegram_empty_output');
       return {id: String(typeof result === 'object' ? result.message_id : output.editId)};
     },
-    async typing(target: ChatTarget) { await call('sendChatAction', {chat_id: target.chatId, action: 'typing'}); },
+    async typing(target: ChatTarget) { await call('sendChatAction', {chat_id: target.chatId, ...(target.topicId ? {message_thread_id: Number(target.topicId)} : {}), action: 'typing'}); },
     async delete(target: ChatTarget, messageId: string) {
       try {
         await call('deleteMessage', {chat_id: target.chatId, message_id: Number(messageId)});

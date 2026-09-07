@@ -42,6 +42,14 @@ test('a Codex thread binds one chat only and every binding explicitly mirrors', 
   assert.throws(()=>validateConfig({adapters,bindings:[{...first,mirror:undefined}]}),/mirror:true/);
   assert.equal(validateConfig({adapters,bindings:[first]}).bindings.length,1);
 });
+test('Telegram topics are separate bindings while legacy non-topic duplicate rules remain stable', () => {
+  const adapters=[{id:'t',type:'telegram',allowUsers:['owner']}];
+  const one={adapter:'t',chatId:'group',topicId:'1',threadId:'one',kind:'group',mirror:true};
+  const two={adapter:'t',chatId:'group',topicId:'2',threadId:'two',kind:'group',mirror:true};
+  assert.equal(validateConfig({adapters,bindings:[one,two]}).bindings.length,2);
+  assert.throws(()=>validateConfig({adapters,bindings:[one,{...one,threadId:'two'}]}),/Duplicate chat binding/);
+  assert.throws(()=>validateConfig({adapters,bindings:[{...one,topicId:''}]}),/optional non-empty topicId/);
+});
 test('retiring a sent surplus chunk stages deletion while unsent surplus is discarded', () => {
   const dir=mkdtempSync(join(tmpdir(),'rin-retire-'));const path=join(dir,'chat.sqlite');const s=new ChatStore(path);
   try{

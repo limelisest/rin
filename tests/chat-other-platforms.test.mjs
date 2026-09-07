@@ -93,6 +93,21 @@ test('OneBot v11 parses segments, authorizes before downloads, and correlates RP
   await adapter.stop();
 });
 
+test('OneBot keeps mixed rich segments in provider order after admission', async () => {
+  const incoming=[];
+  const adapter=createOneBot({id:'ob-order',wsUrl:'ws://onebot',allowUsers:['42'],dmOnly:false,WebSocket:FakeWebSocket,
+    fetch:async()=>new Response('image-bytes')},await context());
+  await adapter.start(async event=>incoming.push(event));
+  FakeWebSocket.instance.emit('message',JSON.stringify({post_type:'message',message_type:'group',self_id:99,user_id:42,group_id:8,message_id:3,message:[
+    {type:'at',data:{qq:'99'}},{type:'text',data:{text:'A'}},{type:'image',data:{url:'https://cdn.example/a.png',name:'a.png'}},{type:'text',data:{text:'B'}},
+    {type:'at',data:{qq:'7'}},{type:'face',data:{id:'5'}},{type:'at',data:{qq:'99'}},{type:'text',data:{text:'C'}},
+  ]}));
+  for(let i=0;i<40 && !incoming.length;i++)await new Promise(resolve=>setTimeout(resolve,1));
+  assert.match(incoming[0].text,/^A\[image: .*a\.png\]B\[@7\]\[sticker: face-6; unavailable: no downloadable URL\]C$/);
+  assert.equal(incoming[0].files.length,1);
+  await adapter.stop();
+});
+
 test('OneBot HTTP sends to the v11 action endpoint with bearer auth', async () => {
   const calls = [];
   const adapter = createOneBot({ id: 'ob', wsUrl: 'ws://onebot', httpUrl: 'http://api/', token: 't', allowUsers: ['42'], dmOnly: true, WebSocket: FakeWebSocket, fetch: async (url, init) => { calls.push({ url, init }); return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data: { message_id: 3 } }) }; } }, await context());
@@ -128,6 +143,21 @@ test('OneBot admits registered bare and @ commands with the default mention gate
   await adapter.stop();
 });
 
+test('OneBot marks a complete owner-and-self member list private-like', async () => {
+  const adapter=createOneBot({id:'ob-private-like',wsUrl:'ws://onebot',allowUsers:['42'],ownerUsers:['42'],dmOnly:true,WebSocket:FakeWebSocket},await context());
+  const incoming=[];
+  await adapter.start(async event=>incoming.push(event));
+  FakeWebSocket.instance.emit('message',JSON.stringify({post_type:'message',message_type:'group',group_id:8,self_id:99,user_id:42,message_id:1,message:'bare'}));
+  await new Promise(setImmediate);
+  assert.equal(FakeWebSocket.instance.last.action,'get_group_member_list');
+  FakeWebSocket.instance.emit('message',JSON.stringify({status:'ok',retcode:0,echo:FakeWebSocket.instance.last.echo,data:[{user_id:42},{user_id:99}]}));
+  await new Promise(setImmediate);
+  assert.equal(incoming.length,1);
+  assert.equal(incoming[0].kind,'group');
+  assert.equal(incoming[0].privateLike,true);
+  await adapter.stop();
+});
+
 class FakeDispatcher {
   register(map) { this.map = map; FakeDispatcher.instance = this; return this; }
 }
@@ -141,6 +171,7 @@ test('Feishu long connection gates resources and uses official message endpoints
   const calls = [];
   const client = { im: {
     messageResource: { get: async () => { resources++; return { headers: { 'content-length': '1' }, getReadableStream: () => Readable.from([Buffer.from('x')]) }; } },
+    messageReaction: { create: async request => { calls.push(['reaction-create', request]); return {code: 0, data: {reaction_id: 'r-1'}}; }, delete: async request => { calls.push(['reaction-delete', request]); return {code: 0}; } },
     message: {
       create: async (request) => { calls.push(['create', request]); return { data: { message_id: 'fs-1' } }; },
       reply: async (request) => { calls.push(['reply', request]); return { data: { message_id: 'fs-reply' } }; },
@@ -157,6 +188,9 @@ test('Feishu long connection gates resources and uses official message endpoints
   assert.equal(resources, 0);
   await FakeDispatcher.instance.map['im.message.receive_v1']({ sender: { sender_id: { open_id: 'owner' } }, message: { message_id: 'm', chat_id: 'c', chat_type: 'p2p', content: JSON.stringify({ text: 'hello' }) } });
   assert.equal(incoming[0].text, 'hello');
+  await FakeDispatcher.instance.map['im.message.receive_v1']({ sender: { sender_id: { open_id: 'owner' } }, message: { message_id: 'post', chat_id: 'c', chat_type: 'p2p', content: JSON.stringify({post:{zh_cn:{content:[[{tag:'text',text:'before '},{tag:'at',id:'other',user_name:'Other'},{tag:'a',text:' link',href:'https://example.test'},{tag:'img',image_key:'post-image',alt:'post.png'}]]}}}) } });
+  assert.equal(incoming[1].text, 'before @Other[ link](https://example.test)[image: post.png]');
+  assert.equal(incoming[1].files.length, 1);
   assert.deepEqual(await adapter.send({ chatId: 'c', userId: 'owner', kind: 'dm' }, { text: 'reply' }), { id: 'fs-1' });
   assert.equal(calls[0][1].params.receive_id_type, 'chat_id');
   assert.equal(calls[0][1].data.receive_id, 'c');
@@ -168,6 +202,9 @@ test('Feishu long connection gates resources and uses official message endpoints
   assert.equal(calls[2][0], 'delete');
   assert.equal(calls[2][1].path.message_id, 'fs-1');
   await assert.rejects(() => adapter.typing({ chatId: 'c', kind: 'dm' }), /does not support typing/);
+  assert.deepEqual(await adapter.startReaction({chatId:'c', kind:'dm', messageId:'m'}), {id:'r-1'});
+  await adapter.endReaction({chatId:'c', kind:'dm', messageId:'m'}, 'r-1');
+  assert.deepEqual(calls.at(-1)[1].path, {message_id:'m', reaction_id:'r-1'});
   await adapter.stop();
 });
 
@@ -188,6 +225,22 @@ test('Feishu admits only recognized group commands through dmOnly', async () => 
   assert.deepEqual(incoming.map(event=>event.id),['1','4']);
   assert.equal(incoming[0].text,'/ping');
   assert.equal(incoming[1].commandTarget,'self');
+  await adapter.stop();
+});
+
+test('Feishu requires every member page and bot count before marking private-like', async () => {
+  const client={im:{
+    chatMembers:{get:async request => ({code:0,data:{member_total:1,items:[{member_id:'owner'}],has_more:false}})},
+    chat:{get:async () => ({code:0,data:{user_count:'1',bot_count:'1'}})},
+  }};
+  const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
+  const adapter=createFeishu({id:'fs-private-like',appId:'a',appSecret:'s',allowUsers:['owner'],ownerUsers:['owner'],dmOnly:true,sdk,client},await context());
+  const incoming=[];
+  await adapter.start(async event=>incoming.push(event));
+  await FakeDispatcher.instance.map['im.message.receive_v1']({sender:{sender_id:{open_id:'owner'}},message:{message_id:'1',chat_id:'g',chat_type:'group',mentions:[],content:JSON.stringify({text:'bare'})}});
+  assert.equal(incoming.length,1);
+  assert.equal(incoming[0].kind,'group');
+  assert.equal(incoming[0].privateLike,true);
   await adapter.stop();
 });
 
@@ -328,4 +381,33 @@ test('Feishu preserves Markdown post styles and media-only quote while refusing 
     await adapter.send({chatId:'c',kind:'dm'},{files:[{path:local,mimeType:'image/png'}],replyTo:'source'});
     assert.equal(calls[1][0],'reply');assert.equal(calls[1][1].path.message_id,'source');assert.equal(calls[1][1].data.msg_type,'image');
   }finally{await adapter.stop();}
+});
+
+test('Feishu registers recovery gates before subscription, then drains live FIFO', async () => {
+  const received=[]; let dispatcher; let wsStarted=false; let historyCalledAfterStart=false;
+  class WS { async start({eventDispatcher}) { wsStarted=true; dispatcher=eventDispatcher; } async close() {} }
+  class Dispatcher { register(map) { return {map}; } }
+  const ctx={...(await context()), getCursor: () => ({c:{messageId:'head',createTime:1000,kind:'dm'}})};
+  const client={im:{message:{list:async () => {
+    historyCalledAfterStart=wsStarted;
+    void dispatcher.map['im.message.receive_v1']({sender:{sender_id:{open_id:'owner'}},message:{message_id:'live',chat_id:'c',chat_type:'p2p',create_time:'3',content:JSON.stringify({text:'live'})}});
+    return {code:0,data:{items:[{message_id:'head',chat_id:'c',create_time:'1',sender:{id:'owner',id_type:'open_id'},body:{content:JSON.stringify({text:'head'})}},{message_id:'history',chat_id:'c',create_time:'2',sender:{id:'owner',id_type:'open_id'},body:{content:JSON.stringify({text:'history'})}}],has_more:false}};
+  }}}};
+  const sdk={Client:class{},EventDispatcher:Dispatcher,WSClient:WS,AppType:{},Domain:{},LoggerLevel:{}};
+  const adapter=createFeishu({id:'fs-recovery',appId:'a',appSecret:'s',allowUsers:['owner'],sdk,client},ctx);
+  await adapter.start(async event=>received.push(event.id));
+  assert.equal(historyCalledAfterStart,true);
+  assert.deepEqual(received,['history','live']);
+  await adapter.stop();
+});
+
+test('Feishu parses top-level post title, user_id mention, link and image in order', async () => {
+  const client={im:{messageResource:{get:async()=>({headers:{'content-length':'1'},getReadableStream:()=>Readable.from([Buffer.from('x')])})}}};
+  const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
+  const adapter=createFeishu({id:'fs-top-post',appId:'a',appSecret:'s',allowUsers:['owner'],botOpenId:'bot',sdk,client},await context()); const incoming=[];
+  await adapter.start(async event=>incoming.push(event));
+  await FakeDispatcher.instance.map['im.message.receive_v1']({sender:{sender_id:{open_id:'owner'}},message:{message_id:'post-top',chat_id:'c',chat_type:'p2p',content:JSON.stringify({title:'Title',content:[[{tag:'text',text:'A'},{tag:'at',user_id:'other',user_name:'Other'},{tag:'a',href:'https://example.test'},{tag:'at',user_id:'bot',user_name:'Bot'},{tag:'img',image_key:'image',alt:'x.png'}]]})}});
+  assert.equal(incoming[0].text,'Title\nA@Otherhttps://example.test[image: x.png]');
+  assert.equal(incoming[0].files[0].mimeType,'image/*');
+  await adapter.stop();
 });

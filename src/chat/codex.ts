@@ -1,6 +1,6 @@
 import type { CodexEvent } from './types.js';
 import type { MessageInput } from '../runtime-types.js';
-interface HistoryRow {thread_id: string; turn_id: string; item_id: string; status: string; rollout_ordinal: number; updated_at_ordinal: number; error_json: string; item_type: string; agent_text?: string; agent_delivery?: string; has_questions?: number; agent_phase?: string; summary_json?: string; image_status?: string; image_path?: string;}
+interface HistoryRow {thread_id: string; turn_id: string; item_id: string; status: string; rollout_ordinal: number; updated_at_ordinal: number; error_json: string; item_type: string; client_message_id?: string; agent_text?: string; agent_delivery?: string; has_questions?: number; agent_phase?: string; summary_json?: string; image_status?: string; image_path?: string;}
 interface ObserverCursor {activeTurns?: {turnId: string; status?: string}[]; turnHighWater: number; itemHighWater: number;}
 interface Watcher {stop(): void; unsubscribe(): void;}
 interface BridgeOptions {command?: string[]; codexHome?: string; onEvent?: (event: CodexEvent) => void; getCursor?: (key: string) => unknown; setCursor?: (key: string, value: unknown) => void; pollMs?: number; queueTimeoutMs?: number; appSteering?: boolean; appWake?: boolean; wakeApp?: (threadId: string) => Promise<unknown>;}
@@ -84,7 +84,7 @@ export class CodexBridge extends CodexQueue {
       if (!context && this.wakeApp) throw new Error('Codex task context unavailable; message was not queued');
       if (context) {
         const receipt = await this.appIpc.steer(threadId, {
-          text: input.text, files, cwd: context.cwd, start: !context.active,
+          text: input.text, files, cwd: context.cwd, start: !context.active, onClientMessageId: input.onClientMessageId,
         });
         if (receipt) return receipt;
         if (this.wakeApp) {
@@ -95,7 +95,7 @@ export class CodexBridge extends CodexQueue {
             context = this.threadContext(threadId);
             if (!context) throw new Error('Codex task unavailable after App wake');
             const resumed = await this.appIpc.steer(threadId, {
-              text: input.text, files, cwd: context.cwd, start: !context.active,
+              text: input.text, files, cwd: context.cwd, start: !context.active, onClientMessageId: input.onClientMessageId,
             });
             if (resumed) return resumed;
             // null means no business input was sent. Errors, including ambiguous
@@ -169,7 +169,7 @@ export class CodexBridge extends CodexQueue {
         ? savedCursor!.turnHighWater
         : initialTurns.reduce((max, row) => Math.max(max, row.rollout_ordinal), -1);
       const initialItems = resuming ? [] : history.prepare(`SELECT item_id, turn_id, updated_at_ordinal FROM thread_items
-        WHERE thread_id = ? AND item_type IN ('agentMessage', 'reasoning', 'imageGeneration')`).all(id) as unknown as HistoryRow[];
+        WHERE thread_id = ? AND item_type IN ('agentMessage', 'reasoning', 'imageGeneration', 'userMessage')`).all(id) as unknown as HistoryRow[];
       const items = new Map(initialItems.map(row => [row.item_id, row.updated_at_ordinal]));
       const itemTurns = new Map(initialItems.map(row => [row.item_id, row.turn_id]));
       let itemHighWater = resuming && Number.isInteger(savedCursor!.itemHighWater)
@@ -227,7 +227,8 @@ export class CodexBridge extends CodexQueue {
             else activeTurns.delete(row.turn_id);
             if (isNew) emit({ threadId: id, turnId: row.turn_id, type: 'started' });
           }
-          const changed = history.prepare(`SELECT turn_id, item_id, item_type, updated_at_ordinal,
+          const changed = history.prepare(`SELECT turn_id, item_id, item_type, rollout_ordinal, updated_at_ordinal,
+              CASE WHEN item_type = 'userMessage' THEN json_extract(item_json, '$.clientId') END AS client_message_id,
               CASE WHEN item_type = 'agentMessage' THEN json_extract(item_json, '$.text') END AS agent_text,
               CASE WHEN item_type = 'agentMessage' THEN json_extract(item_json, '$.phase') END AS agent_phase,
               CASE WHEN item_type = 'agentMessage' THEN json_extract(item_json, '$.delivery') END AS agent_delivery,
@@ -236,16 +237,21 @@ export class CodexBridge extends CodexQueue {
               CASE WHEN item_type = 'imageGeneration' THEN json_extract(item_json, '$.status') END AS image_status,
               CASE WHEN item_type = 'imageGeneration' THEN json_extract(item_json, '$.savedPath') END AS image_path
             FROM thread_items
-            WHERE thread_id = ? AND item_type IN ('agentMessage', 'reasoning', 'imageGeneration') AND updated_at_ordinal > ?
+            WHERE thread_id = ? AND item_type IN ('agentMessage', 'reasoning', 'imageGeneration', 'userMessage') AND updated_at_ordinal > ?
             ORDER BY updated_at_ordinal`).all(id, itemHighWater) as unknown as HistoryRow[];
           for (const row of changed) {
             itemHighWater = Math.max(itemHighWater, row.updated_at_ordinal);
             if (items.get(row.item_id) === row.updated_at_ordinal) continue;
             items.set(row.item_id, row.updated_at_ordinal);
             itemTurns.set(row.item_id, row.turn_id);
+            if (row.item_type === 'userMessage') {
+              emit({ threadId: id, turnId: row.turn_id, type: 'input', itemId: row.item_id,
+                ordinal: row.rollout_ordinal, ...(typeof row.client_message_id === 'string' ? { clientMessageId: row.client_message_id } : {}) });
+              continue;
+            }
             if (row.item_type === 'imageGeneration') {
               if (row.image_status === 'completed' && typeof row.image_path === 'string' && row.image_path) {
-                emit({ threadId: id, turnId: row.turn_id, type: 'image', itemId: row.item_id, path: row.image_path });
+                emit({ threadId: id, turnId: row.turn_id, type: 'image', itemId: row.item_id, path: row.image_path, ordinal: row.rollout_ordinal });
               }
               continue;
             }
@@ -253,7 +259,7 @@ export class CodexBridge extends CodexQueue {
             const text = visible?.text;
             const phase = visible?.phase;
             if (!text) continue;
-            emit({ threadId: id, turnId: row.turn_id, type: 'text', itemId: row.item_id, phase, text });
+            emit({ threadId: id, turnId: row.turn_id, type: 'text', itemId: row.item_id, phase, text, ordinal: row.rollout_ordinal });
           }
           for (const row of terminal) {
             activeTurns.delete(row.turn_id);

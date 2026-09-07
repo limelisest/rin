@@ -14,6 +14,13 @@ test('Discord rejects bots, guild messages by default, and users outside the all
   assert.equal(normalizeDiscordMessage(base, {allowUsers: ['allowed']}).kind, 'dm');
 });
 
+test('Telegram edited topic replies retain native quote context and thread identity', () => {
+  const message={message_id:8,message_thread_id:44,text:'',chat:{id:-100,type:'supergroup'},from:{id:1,username:'owner'},reply_to_message:{message_id:7,text:'quoted',chat:{id:-100,type:'supergroup'},from:{id:2,username:'other'},voice:{file_id:'voice',mime_type:'audio/ogg'}}};
+  const normalized=normalizeTelegramUpdate({edited_message:message},{allowUsers:['1'],dmOnly:false,requireMention:false},{id:'9',username:'rin'});
+  assert.equal(normalized?.edited,true);assert.equal(normalized?.topicId,'44');assert.equal(normalized?.replyTo,'7');
+  assert.deepEqual(normalized?.reply,{messageId:'7',authorId:'2',authorName:'other',text:'quoted',media:[{kind:'voice',name:'voice.ogg',mimeType:'audio/ogg',unavailable:'quoted attachment was not downloaded'}]});
+});
+
 test('Discord applies admission before downloading attachments', async () => {
   const client = new EventEmitter(); client.user = {id: 'bot'}; client.login = async () => {}; client.isReady = () => true; client.destroy = async () => {};
   let fetched = 0; let delivered = 0;
@@ -165,7 +172,7 @@ test('Telegram normalization selects the largest photo and gates before file par
   assert.equal(denied, null);
   const accepted = normalizeTelegramUpdate({message: {message_id: 2, chat: {id: 3, type: 'private'}, from: {id: 1}, photo: [{file_id: 'small'}, {file_id: 'large'}]}}, {allowUsers: ['1']});
   assert.equal(accepted.descriptor.id, 'large');
-  assert.equal(normalizeTelegramUpdate({edited_message: {message_id: 2, chat: {id: 3, type: 'private'}, from: {id: 1}}}, {allowUsers: ['1']}), null);
+  assert.equal(normalizeTelegramUpdate({edited_message: {message_id: 2, chat: {id: 3, type: 'private'}, from: {id: 1}}}, {allowUsers: ['1']})?.edited, true);
 });
 
 test('Telegram normalizes commands addressed to this bot and preserves another bot target for admission', () => {
@@ -249,6 +256,32 @@ test('Telegram commits its cursor only after durable message acceptance', async 
   release(); await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(commits, [['telegram:main:offset', 42]]);
   // The replacement long poll intentionally never resolves, so don't await stop in this unit test.
+});
+
+test('Telegram marks only a freshly proven owner-and-bot group as private-like', async () => {
+  let polls = 0; const received = []; const calls = [];
+  const api = {raw: {
+    deleteWebhook: async () => true, getMe: async () => ({id: 9, username: 'rin'}),
+    getUpdates: async (_payload, signal) => polls++ === 0
+      ? [{update_id: 10, message: {message_id: 7, text: 'bare group text', chat: {id: -100, type: 'group'}, from: {id: 1}}}]
+      : await new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')), {once: true})),
+    getChatMemberCount: async value => { calls.push(['count', value]); return 2; },
+    getChatMember: async value => { calls.push(['member', value]); return {status: 'member', user: {id: value.user_id, is_bot: value.user_id === 9}}; },
+  }};
+  const adapter = telegramAdapter({id: 'main', token: 'x', allowUsers: ['1'], ownerUsers: ['1'], dmOnly: true, __api: api}, {
+    dataDir: '/tmp', log: {}, getCursor: async () => 0, setCursor: async () => {},
+  });
+  await adapter.start(async message => received.push(message));
+  for (let i = 0; i < 20 && !received.length; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(received.length, 1);
+  assert.equal(received[0].kind, 'group');
+  assert.equal(received[0].privateLike, true);
+  assert.deepEqual(calls, [
+    ['count', {chat_id: -100}],
+    ['member', {chat_id: -100, user_id: 1}],
+    ['member', {chat_id: -100, user_id: 9}],
+  ]);
+  await adapter.stop();
 });
 
 test('Telegram preserves the text message id with files and accepts idempotent edits', async () => {

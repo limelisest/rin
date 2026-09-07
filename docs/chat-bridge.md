@@ -16,6 +16,8 @@ node src/rin.mjs status /absolute/path/to/private/chat.json
 
 所有直接入口要求 `allowUsers` 匹配平台提供的用户 ID。Discord 默认仅私聊；其他平台的群消息默认要求提及机器人。先准入与检查绑定，再下载附件。
 
+`ownerUsers` 是可选的旧身份迁移字段，不能从 `allowUsers` 推导，也不会给命令或普通消息增加准入权限。它只允许适配器在每条群消息上取得完整成员证明后，把“唯一非机器人成员正是该显式 owner”的群按私聊规则处理；传输类型仍为群。成功结果不缓存，失败、接口缺失或成员不完整都按普通群，失败结果最多缓存十分钟。Telegram 使用 `getChatMemberCount = 2` 加上 bot 与发件人的在群证明；OneBot 使用完整 `get_group_member_list`（且必须含本机 bot）；飞书逐页读取全部成员并核对用户/机器人总数。Discord 当前缓存、线程已加入成员和频道可见成员都不能证明完整成员集合，QQ 官方没有完整群成员 API，所以两者安全地保持群规则。
+
 直接路由由私有 `bindings` 配置提供，一个任务只能绑定一个聊天。`mirror:true` 表示该任务之后所有公开输出都会同步，包括在 App 中直接开展工作的输出；不会回放已有历史。
 
 QQ 官方平台使用 OpenID，不能把普通 QQ 数字号或 OneBot 用户 ID 当成它。平台开发体验资格与本地白名单是独立门槛。Discord 的 Nerve 注意力模式则停用直接绑定入口，见 [Nerve](nerve.md)。
@@ -50,7 +52,7 @@ QQ 诊断只记录网关事件类型和准入失败的账号/聊天标识，不�
 
 The authoritative catalog contains `/help`, `/usage`, and locally installed command extensions. The same catalog drives text invocation, execution, help, and platform registration. Existing `bindings` remain message routes and are independent of command discovery.
 
-Command permission uses the same explicit `allowUsers` admission on every adapter, with no owner role or channel allowlist. Registered commands bypass `dmOnly` and the group-mention requirement; native slash interactions also address the bot directly. This preserves the old command UX for an admitted user while deliberately not restoring its private identity database and owner-presence check. A slash-like text is classified before catalog lookup: `/name@this_bot` is accepted as `name`, `/name@another_bot` is never executed locally, and `/session` remains silently ignored for compatibility. After admission, an unregistered slash command replies `Unknown command. Send /help to see available commands.` in a direct chat and stays silent in a group. `privateOnly` restricts where an extension result may be shown; built-in `/help` and `/usage` are available in groups. Recognized Discord controls do not enter the attention/model path.
+Command permission uses the same explicit `allowUsers` admission on every adapter, with no owner role or channel allowlist. `ownerUsers` can only participate in the separately proven private-like presentation rule; it does not authorize a command. Registered commands bypass `dmOnly` and the group-mention requirement; native slash interactions also address the bot directly. A slash-like text is classified before catalog lookup: `/name@this_bot` is accepted as `name`, `/name@another_bot` is never executed locally, and `/session` remains silently ignored for compatibility. After admission, an unregistered slash command replies `Unknown command. Send /help to see available commands.` in a direct or proven private-like chat and stays silent in an ordinary group. `privateOnly` restricts where an extension result may be shown; built-in `/help` and `/usage` are available in groups. Recognized Discord controls do not enter the attention/model path.
 
 Command IDs are claimed durably before execution, so platform replay cannot invoke a handler twice. Interrupted commands are not automatically replayed. Discord private response handles exist only in memory: after restart or expiry, a reply fails closed instead of posting publicly.
 
@@ -98,7 +100,7 @@ The working indicator is plain display text. Put optional settings in the privat
 }
 ```
 
-Nonempty `frames` take priority over `text`. If neither is supplied, Rin uses one `Working...` frame. Editable platforms rotate configured frames while preserving existing summaries and commentary. Final output, completion, failure, observer errors, and shutdown stop rotation. Platforms without editing receive one working marker. This setting does not select a language or change other chat text.
+Nonempty `frames` take priority over `text`. If neither is supplied, Rin uses one `Working...` frame. Editable platforms rotate configured frames while preserving existing summaries and commentary. Final output, completion, failure, observer errors, and shutdown stop rotation. Platforms with reaction support create one working reaction for the accepted reply and remove it at the same lifecycle boundary; if the platform rejects that reaction, they fall back to one quoted working marker. Other platforms without editing receive one working marker. This setting does not select a language or change other chat text.
 
 QQ official [command panels](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/menu-panel/) fill the chat input box. Message admission and passive-reply rules still apply; this API is unrelated to OneBot v11.
 

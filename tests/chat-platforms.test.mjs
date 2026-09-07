@@ -73,6 +73,27 @@ test('Discord registers the shared commands and routes deferred slash commands t
   await adapter.stop();
 });
 
+test('Discord dismisses a deferred response for an explicitly silent command',async()=>{
+  const client=new EventEmitter();client.user={id:'bot'};client.login=async()=>{};client.isReady=()=>true;client.destroy=async()=>{};
+  client.application={commands:{set:async()=>{}}};let incoming,deletes=0;
+  const adapter=discordAdapter({token:'x',allowUsers:['allowed'],__client:client,__dismissRetryDelays:[0,0,0]},{dataDir:'/tmp',log:{},isBound:async()=>true});
+  await adapter.start(message=>{incoming=message;});
+  client.emit('interactionCreate',{id:'silent-ix',channelId:'dm',user:{id:'allowed'},commandName:'help',isChatInputCommand:()=>true,
+    options:{getString:()=>null},deferReply:async()=>{},deleteReply:async()=>{deletes++;}});
+  await new Promise(resolve=>setImmediate(resolve));
+  await adapter.dismiss(incoming);
+  assert.equal(deletes,1);
+  await assert.rejects(adapter.dismiss(incoming),/interaction_unavailable/);
+  let failedDeletes=0;
+  client.emit('interactionCreate',{id:'failed-silent-ix',channelId:'dm',user:{id:'allowed'},commandName:'help',isChatInputCommand:()=>true,
+    options:{getString:()=>null},deferReply:async()=>{},deleteReply:async()=>{failedDeletes++;throw new Error('network');}});
+  await new Promise(resolve=>setImmediate(resolve));
+  await assert.rejects(adapter.dismiss(incoming),/interaction_dismiss_failed/);
+  assert.equal(failedDeletes,3);
+  await assert.rejects(adapter.dismiss(incoming),/interaction_unavailable/);
+  await adapter.stop();
+});
+
 test('Discord registers and routes dynamic commands without exposing their implementation', async () => {
   const registered=[]; const received=[];
   const commands=[{name:'ping',description:'Check latency',argument:'Optional label',run(){throw new Error('must not run');}}];

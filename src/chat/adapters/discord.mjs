@@ -7,10 +7,15 @@ import {COMMANDS, parseCommand, registerCommands} from '../commands.mjs';
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const READY_TIMEOUT_MS = 30_000;
+const DISMISS_RETRY_DELAYS_MS = [0, 100, 300];
 
 function explicitMediaRejection(error) {
   const status=Number(error?.status ?? error?.statusCode ?? error?.response?.status);
   return Number.isFinite(status) && status>=400 && status<500;
+}
+
+function missingInteractionResponse(error) {
+  return [10008,10015].includes(Number(error?.code)) || /unknown (?:message|webhook)/i.test(String(error?.message || ''));
 }
 
 function discordCommandDefinitions(commands) {
@@ -86,6 +91,8 @@ export function createAdapter(config, context) {
   const interactions = new Map();
   const pendingInteractions = new Set();
   const fetchImpl = config.__fetch || globalThis.fetch;
+  const dismissRetryDelays=Array.isArray(config.__dismissRetryDelays) && config.__dismissRetryDelays.length
+    ? config.__dismissRetryDelays : DISMISS_RETRY_DELAYS_MS;
   const capabilities = {edit: true, typing: true, maxText: 2000};
 
   async function receive(message) {
@@ -253,6 +260,22 @@ export function createAdapter(config, context) {
       }
       try { const sent = await destination.send(payload); return {id: String(sent.id)}; }
       catch(error) { if(payload.files?.length && explicitMediaRejection(error))error.fallbackSafe=true;throw error; }
+    },
+    async dismiss(target) {
+      const interactionId=target.commandInteraction?.id;
+      if(!interactionId)return;
+      const entry=interactions.get(String(interactionId));
+      if(!entry)throw new Error('discord_command_interaction_unavailable');
+      const {interaction,timer}=entry;
+      try {
+        for(const waitMs of dismissRetryDelays) {
+          if(waitMs>0)await new Promise(resolve=>setTimeout(resolve,waitMs));
+          try { await interaction.deleteReply();return; }
+          catch(error) { if(missingInteractionResponse(error))return; }
+        }
+        throw new Error('discord_command_interaction_dismiss_failed');
+      }
+      finally { clearTimeout(timer);interactions.delete(String(interactionId)); }
     },
     async typing(target) { const destination = await channel(target.chatId); await destination.sendTyping(); },
     async delete(target, messageId) {

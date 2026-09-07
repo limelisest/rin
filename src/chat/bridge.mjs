@@ -106,14 +106,17 @@ export class ChatBridge {
     if(this.store.cursor(key))return true;
     this.store.setCursor(key,{state:'started'});
     let output;
+    let silent=false;
     try {
       if(command.privateOnly && message.kind!=='dm')output={text:'请在私聊中使用此命令。'};
       else {
         const result=await command.run({args:parsed.args,message:{adapter:config.id,id:message.id,chatId:message.chatId,userId:message.userId,kind:message.kind,text:message.text},dataDir:this.config.dataDir});
         if(!result || typeof result!=='object' || (result.text!==undefined && typeof result.text!=='string') ||
           (result.fallbackText!==undefined && typeof result.fallbackText!=='string') ||
+          (result.silent!==undefined && typeof result.silent!=='boolean') ||
           (result.files!==undefined && (!Array.isArray(result.files) || result.files.some(file=>!file || typeof file.path!=='string' || (file.name!==undefined && typeof file.name!=='string') || (file.mimeType!==undefined && typeof file.mimeType!=='string')))) ||
-          (!result.text && !result.files?.length))throw new Error('Invalid command result');
+          (!result.text && !result.files?.length && (result.silent!==true || Boolean(result.fallbackText))))throw new Error('Invalid command result');
+        silent=result.silent===true && !result.text && !result.files?.length;
         output={text:result.text || '',...(result.fallbackText?{fallbackText:result.fallbackText}:{}),...(result.files?.length?{files:result.files.map(({path,name,mimeType})=>({path,...(name?{name}:{}),...(mimeType?{mimeType}:{})}))}:{})};
       }
     } catch {
@@ -122,6 +125,14 @@ export class ChatBridge {
     }
     const target={chatId:message.chatId,kind:message.kind,userId:message.userId,messageId:message.id,
       ...(message.commandInteraction?{commandInteraction:{id:message.commandInteraction.id}}:{})};
+    if(silent) {
+      if(message.commandInteraction) {
+        try { await this.adapters.get(config.id)?.dismiss?.(target); }
+        catch { this.log.warn('silent command interaction cleanup failed',{name:command.name}); }
+      }
+      this.store.setCursor(key,{state:'done'});
+      return true;
+    }
     const chunks=['discord','telegram'].includes(config.type)
       ? prepareText(config.type,output.text || '',this.adapters.get(config.id)?.capabilities.maxText || 1900)
       : splitText(stripMarkdownFormatting(output.text || ''),1900).map(text=>({text}));

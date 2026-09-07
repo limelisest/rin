@@ -3,9 +3,16 @@ interface BridgeContract { start():Promise<unknown>; stop():Promise<unknown>; wa
 interface AppExecOptions extends ExecOptions {bridgeFactory?:(options:ExecOptions & {appSteering:boolean;appWake:boolean;onEvent:(event:AppEvent)=>void})=>BridgeContract}
 import { CodexBridge } from './chat/codex.js';
 
-function uncertain(reason: string) {
-  const error: NodeJS.ErrnoException = new Error(`Codex App ${reason}; outcome uncertain, do not replay automatically`);
+function uncertain(reason: string, cause?: unknown) {
+  const details = cause instanceof Error
+    ? `; cause=${cause.name}${typeof (cause as NodeJS.ErrnoException).code === 'string' ? ` [${(cause as NodeJS.ErrnoException).code}]` : ''}: ${cause.message.slice(0,1024)}`
+    : '';
+  const error: NodeJS.ErrnoException = new Error(`Codex App ${reason}${details}; outcome uncertain, do not replay automatically`);
   error.code = 'CODEX_APP_UNCERTAIN';
+  if (cause instanceof Error) {
+    const causeCode = typeof (cause as NodeJS.ErrnoException).code === 'string' ? ` [${(cause as NodeJS.ErrnoException).code}]` : '';
+    error.cause = new Error(`${cause.name}${causeCode}: ${cause.message.slice(0,1024)}`);
+  }
   return error;
 }
 
@@ -31,7 +38,7 @@ export class CodexAppExec {
     if (typeof text !== 'string' || !text.trim()) throw new Error('text required');
     this.threadId = threadId;
     return new Promise<ExecResult>((resolve, reject) => {
-      let settled = false, turnId: string | undefined;
+      let settled = false, turnId: string | undefined, stage = 'start';
       const observed = new Map<string,{text?:string;terminal?:string}>();
       const finish = (error:Error|null, result?:ExecResult) => {
         if (settled) return;
@@ -48,10 +55,10 @@ export class CodexAppExec {
         else if (state?.terminal === 'failed') finish(uncertain('turn failed or was interrupted'));
       };
       const active = {
-        cancel: () => finish(uncertain('observer stopped')),
+        cancel: () => finish(uncertain('observe stopped')),
         onEvent: (event:AppEvent) => {
           if (settled || event.threadId !== threadId) return;
-          if (event.type === 'observerError') return finish(uncertain('history observer failed'));
+          if (event.type === 'observerError') return finish(uncertain('observe failed', new Error(String((event as AppEvent & {error?: unknown}).error || event.text || 'history observer failed'))));
           if (!event.turnId || (turnId && event.turnId !== turnId)) return;
           if (!['completed', 'failed', 'text'].includes(event.type)) return;
           // A turn can finish while IPC is still returning its receipt. Keep a
@@ -69,19 +76,23 @@ export class CodexAppExec {
       this.submissions = this.submissions.then(async () => {
         try {
           if (settled || this.stopped) return;
+          stage = 'start';
           await this.bridge.start();
           if (settled || this.stopped) return;
+          stage = 'watch';
           this.unsubscribe ||= this.bridge.watch(threadId);
           if (settled) return;
+          stage = 'queue';
           const receipt = await this.bridge.queue(threadId, { text });
           if (settled) return;
           if (!receipt?.turnId || !['app-ipc-start', 'app-ipc-steer'].includes(receipt.transport || '')) {
             finish(uncertain('delivery did not identify an App turn'));
             return;
           }
+          stage = 'receipt';
           turnId = receipt.turnId;
           check();
-        } catch { finish(uncertain('delivery or observer failed')); }
+        } catch (error) { finish(uncertain(`${stage} failed`, error)); }
       });
     });
   }

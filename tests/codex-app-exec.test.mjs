@@ -66,6 +66,24 @@ for (const kind of ['failed', 'observerError', 'timeout', 'queued', 'queueError'
   });
 }
 
+test('App delivery error retains the failing stage and original error metadata', async () => {
+  const fixture = setup(async () => {
+    const error = new Error('owner discovery returned no client');
+    error.code = 'CODEX_APP_IPC_ERROR';
+    throw error;
+  });
+  await assert.rejects(fixture.runner.run(threadId, { text: 'event' }), error => {
+    assert.equal(error.code, 'CODEX_APP_UNCERTAIN');
+    assert.match(error.message, /queue failed/);
+    assert.match(error.message, /CODEX_APP_IPC_ERROR/);
+    assert.match(error.message, /owner discovery returned no client/);
+    assert.match(error.cause?.message || '', /CODEX_APP_IPC_ERROR/);
+    assert.match(error.cause?.message || '', /owner discovery returned no client/);
+    return true;
+  });
+  await fixture.runner.stop();
+});
+
 test('Nerve app target preserves one session, prompt and no automatic retry', async () => {
   const target = { type: 'codex-app', threadId };
   assert.throws(() => validateConfig({ targets: { a: target, b: { type: 'codex', threadId } } }), /Only one/);

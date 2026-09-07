@@ -76,6 +76,7 @@ export async function collectChoices({hasAgents = false, legacy = null, home, ag
     `Subagent guidance: ${subagentGuidance ? 'append if not already present' : 'skip'}`,
     agentsPath ? `Instructions file: ${agentsPath}` : '',
     'Original-session search: included (FFF MCP)',
+    'Nerve MCP: included; initialize and start a local service with no event targets or chat accounts',
   ].filter(Boolean).join('\n'),'Installation plan');
   if (!await confirmChoice('Install Rin with these choices?',true,ui)) { ui.outro('Finished without installing Rin.'); return null; }
   return {products,recommendations,agents,subagentGuidance};

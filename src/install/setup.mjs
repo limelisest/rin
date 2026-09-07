@@ -7,8 +7,10 @@ import { createService } from './service.mjs';
 import { installProducts, installHistoryTool, historySupport } from './products.mjs';
 import { applyRecommendedCodexProfile } from './profile.mjs';
 import {appendAgentsInstructions} from './instructions.mjs';
-import {collectChoices,confirmChoice,runSetupProgress,setupUI} from './setup-ui.mjs';
+import {collectChoices,runSetupProgress,setupUI} from './setup-ui.mjs';
 import { inspectLegacy, disableLegacy } from './legacy.mjs';
+import {ensureNerveMcp} from './nerve.mjs';
+import {activateNerveMcp} from './nerve-service.mjs';
 export { inspectLegacy, disableLegacy } from './legacy.mjs';
 export {collectChoices} from './setup-ui.mjs';
 export {appendAgentsInstructions,RIN_SUBAGENT_INSTRUCTIONS} from './instructions.mjs';
@@ -32,12 +34,15 @@ export async function ensureCommandPath(binDir, { userHome = homedir(), platform
     }
   }
 }
+const load = `import{readFileSync}from'node:fs';import{join,dirname,delimiter}from'node:path';import{fileURLToPath,pathToFileURL}from'node:url';\nconst home=dirname(fileURLToPath(import.meta.url));process.env.PATH=dirname(process.execPath)+delimiter+(process.env.PATH||'');const state=JSON.parse(readFileSync(join(home,'install.json'),'utf8'));if(!/^[a-f0-9]{40}$/.test(state.current))throw Error('Invalid Rin release');\n`;
+export async function writeNerveLauncher(home) {
+  await writeFile(join(home, 'nerve-mcp-run.mjs'), load + `try{const{main}=await import(pathToFileURL(join(home,'releases',state.current,'src/nerve-mcp.mjs')));await main();}catch{process.stderr.write('Nerve MCP failed to start; check installation and private configuration.\\n');process.exitCode=1;}\n`);
+}
 export async function writeLaunchers(home, { binDir, node = process.execPath, platform = process.platform, publish = true } = {}) {
   await mkdir(binDir, { recursive: true });
   // Stable entrypoints read the same atomic record. Updating never rewrites live source.
-  const load = `import{readFileSync}from'node:fs';import{join,dirname,delimiter}from'node:path';import{fileURLToPath,pathToFileURL}from'node:url';\nconst home=dirname(fileURLToPath(import.meta.url));process.env.PATH=dirname(process.execPath)+delimiter+(process.env.PATH||'');const state=JSON.parse(readFileSync(join(home,'install.json'),'utf8'));if(!/^[a-f0-9]{40}$/.test(state.current))throw Error('Invalid Rin release');\n`;
   await writeFile(join(home, 'launcher.mjs'), load + `const{main}=await import(pathToFileURL(join(home,'releases',state.current,'src/cli.mjs')));try{process.exitCode=await main(process.argv.slice(2),{home});}catch(e){console.error(e.message);process.exitCode=1;}\n`);
-  await writeFile(join(home, 'nerve-mcp-run.mjs'), load + `try{const{main}=await import(pathToFileURL(join(home,'releases',state.current,'src/nerve-mcp.mjs')));await main();}catch{process.stderr.write('Nerve MCP failed to start; check installation and private configuration.\\n');process.exitCode=1;}\n`);
+  await writeNerveLauncher(home);
   await writeFile(join(home, 'daemon-run.mjs'), load + `
 import{writeFileSync,renameSync,unlinkSync}from'node:fs';
 process.env.RIN_MANAGED_DAEMON='1';
@@ -97,12 +102,13 @@ export async function setup({ home = installHome(), repository = REPOSITORY, bin
     await runSetupProgress('Register the Rin service', () => service.install());
     const tool = await runSetupProgress('Install original-session text search (FFF MCP)', () => installHistoryTool({ home, codexHome }));
     setupUI.log.success(tool.registered ? 'Original-session text search is registered.' : 'FFF is installed. An existing session-history MCP entry was preserved.');
+    const nerve = await runSetupProgress('Configure and register Nerve MCP', () => ensureNerveMcp({home,codexHome}));
     // Service registration and auxiliary setup must succeed before the old CLI is disabled.
     await disableLegacy(legacy);
     let launcher;
     try {
       launcher = await writeLaunchers(home, { binDir });
-      await atomicJSON(join(home, 'install.json'), { schema: 1, type: 'git', repository, current: candidate.sha, previous: null, node: process.execPath, binDir, recommendationsRequested: choices.recommendations });
+      await atomicJSON(join(home, 'install.json'), { schema: 1, type: 'git', repository, current: candidate.sha, previous: null, node: process.execPath, binDir, codexHome, recommendationsRequested: choices.recommendations });
     } catch (error) {
       for (const file of legacy?.cli || []) {
         if (await exists(`${file}.pi-disabled`)) { await rm(file, { force: true }); await rename(`${file}.pi-disabled`, file); }
@@ -110,9 +116,8 @@ export async function setup({ home = installHome(), repository = REPOSITORY, bin
       throw new Error(`Installation cutover failed: ${error.message}. Legacy CLI launchers were restored; its service remains stopped.`);
     }
     await ensureCommandPath(binDir);
-    const daemon = JSON.parse(await readFile(join(home, 'private/daemon.json'), 'utf8'));
-    if ((daemon.chat || daemon.nerve) && await confirmChoice('Configured background services were found. Start Rin now?', false)) await runSetupProgress('Start Rin', () => service.start());
-    else setupUI.log.info('The daemon is installed but stopped. Codex CLI use does not need it. Configure private/daemon.json, then run rin start when you need background work.');
+    await runSetupProgress('Start the local Nerve service', () => activateNerveMcp({home,service,nerve}));
+    setupUI.log.info('Nerve MCP is registered. Reconnect existing Codex sessions to load it; chat accounts and event targets can be configured separately.');
     setupUI.outro(`Rin installed: ${launcher}\nOpen a new terminal to load the command path. Run rin to use Codex; rin update updates this Git installation.`);
     return { home, release: candidate.sha };
   });

@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {mkdtemp,mkdir,readFile,realpath,rm,writeFile} from 'node:fs/promises';
+import {cp,mkdtemp,mkdir,readFile,realpath,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {RIN_LEGACY_SUBAGENT_INSTRUCTIONS,RIN_SUBAGENT_INSTRUCTIONS} from '../src/install/instructions.mjs';
-import {runUpdateMigrations} from '../src/install/migrations.mjs';
+import {runUpdateMigrations,migrationHome} from '../src/install/migrations.mjs';
+import {pathToFileURL} from 'node:url';
 import {main} from '../src/cli.mjs';
 
 test('ordinary update runs managed migrations without applying the recommended profile',async t=>{
@@ -14,7 +15,7 @@ test('ordinary update runs managed migrations without applying the recommended p
   await writeFile(join(codexHome,'AGENTS.md'),`Personal preface.\n\n${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n`);
   await writeFile(join(codexHome,'config.toml'),'model_auto_compact_token_limit = 120000\n');
   let request;
-  const result=await runUpdateMigrations({codexHome,writeConfig:async value=>{request=value;return{ok:true};}});
+  const result=await runUpdateMigrations({home:null,codexHome,writeConfig:async value=>{request=value;return{ok:true};}});
   assert.deepEqual(result,{agentsChanged:true,obsoleteConfigRemoved:true,contextManagementMigrated:false});
   assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),`Personal preface.\n\n${RIN_SUBAGENT_INSTRUCTIONS}\n`);
   assert.deepEqual(request.edits,[{keyPath:'model_auto_compact_token_limit',value:null,mergeStrategy:'upsert'}]);
@@ -41,12 +42,69 @@ test('rin update runs migrations even when the release is already current',async
     assert.equal(await main(['update'],{
       home,codexHome,
       serviceFactory:()=>({}),
+      ensureMcp:async()=>({registered:true,needsActivation:false}),
       writeConfig:async value=>{request=value;return{ok:true};},
     }),0);
   } finally { console.log=originalLog; }
   assert.deepEqual(output,['Rin is already up to date.']);
   assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),`${RIN_SUBAGENT_INSTRUCTIONS}\n`);
   assert.deepEqual(request.edits,[{keyPath:'model_auto_compact_token_limit',value:null,mergeStrategy:'upsert'}]);
+});
+
+test('candidate migration discovers custom install homes for older updaters',()=>{
+  const home=join(tmpdir(),'custom Rin');
+  assert.equal(migrationHome(pathToFileURL(join(home,'releases','a'.repeat(40),'src/install/migrations.mjs'))),home);
+  assert.equal(migrationHome(pathToFileURL(join(home,'src/install/migrations.mjs'))),undefined);
+});
+
+test('migration loaded by an older updater repairs its custom home without receiving home',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'rin-old-updater-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const home=join(root,'custom install'),codexHome=join(root,'codex'),release=join(home,'releases','b'.repeat(40));
+  await mkdir(codexHome);await mkdir(release,{recursive:true});
+  await cp(join(process.cwd(),'src'),join(release,'src'),{recursive:true});
+  await symlink(join(process.cwd(),'node_modules'),join(release,'node_modules'),process.platform==='win32'?'junction':'dir');
+  await writeFile(join(home,'install.json'),JSON.stringify({schema:1,type:'git',repository:'/origin',current:'a'.repeat(40),node:process.execPath}));
+  const {runUpdateMigrations:migrate}=await import(pathToFileURL(join(release,'src/install/migrations.mjs')));
+  const canonicalHome=await realpath(home);
+  const events=[],service={};
+  await migrate({codexHome,service,
+    ensureMcp:async options=>{assert.equal(options.home,canonicalHome);events.push('repair');return{needsActivation:true};},
+    activateMcp:async options=>{assert.equal(options.home,canonicalHome);assert.equal(options.service,service);events.push('activate');},
+  });
+  assert.deepEqual(events,['repair','activate']);
+});
+
+test('update repairs bundled MCP and activates added work even without a newer release',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'rin-update-mcp-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const home=join(root,'install'),codexHome=join(root,'codex');
+  await mkdir(home,{recursive:true});await mkdir(codexHome);
+  const current='a'.repeat(40);
+  await writeFile(join(home,'install.json'),JSON.stringify({schema:1,type:'git',repository:'/origin',current,node:process.execPath,codexHome}));
+  const events=[],service={};
+  await main(['update'],{home,serviceFactory:()=>service,prepare:async()=>({sha:current,changed:false}),
+    ensureMcp:async options=>{assert.equal(options.codexHome,codexHome);events.push('repair');return{needsActivation:true,configPath:'/config'};},
+    activateMcp:async options=>{assert.equal(options.service,service);assert.equal(options.nerve.needsActivation,true);events.push('activate');},
+  });
+  assert.deepEqual(events,['repair','activate']);
+  assert.match(await readFile(join(home,'nerve-mcp-run.mjs'),'utf8'),/nerve-mcp\.mjs/);
+});
+
+test('candidate MCP activation is deferred until the verified release is selected',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'rin-update-mcp-switch-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const home=join(root,'install'),release=join(root,'candidate'),current='a'.repeat(40),next='b'.repeat(40);
+  await mkdir(join(release,'src/install'),{recursive:true});await mkdir(home);
+  await writeFile(join(home,'install.json'),JSON.stringify({schema:1,type:'git',repository:'/origin',current,node:process.execPath}));
+  await writeFile(join(release,'src/install/migrations.mjs'),`export async function runUpdateMigrations(options){if(!options.deferActivation)throw Error('activation not deferred');return{nerve:await options.ensureMcp(options)};}`);
+  const events=[];
+  await main(['update'],{home,serviceFactory:()=>({}),prepare:async()=>({sha:next,release,changed:true}),
+    ensureMcp:async()=>{events.push('repair');return{needsActivation:true};},
+    switchTo:async()=>events.push('switch'),
+    activateMcp:async({nerve})=>{assert.equal(nerve.needsActivation,true);events.push('activate');},
+  });
+  assert.deepEqual(events,['repair','switch','activate']);
 });
 
 test('rin update runs the verified candidate migration before switching releases',async t=>{
@@ -76,7 +134,7 @@ test('update migrates the legacy context flag without applying other recommendat
   await writeFile(file,'[features]\ncontext_management = false\n');
   const filePath=await realpath(file);
   const requests=[];
-  const result=await runUpdateMigrations({codexHome,
+  const result=await runUpdateMigrations({home:null,codexHome,
     readConfig:async()=>({layers:[{name:{type:'user',file:filePath},version:'v1',config:{features:{context_management:false}}}]}),
     writeConfig:async request=>{requests.push(request);return{status:'ok'};},
   });

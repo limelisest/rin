@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { installHome, readInstall, withInstallLock, prepareRelease, switchRelease, codexCommand } from './install/core.mjs';
 import { createService } from './install/service.mjs';
 import { runUpdateMigrations } from './install/migrations.mjs';
+import {activateNerveMcp} from './install/nerve-service.mjs';
 
 export function routeArgs(args) {
   if (args[0] === '--') return { type: 'codex', args: args.slice(1) };
@@ -16,7 +17,7 @@ export function routeArgs(args) {
   }
   return { type: 'codex', args };
 }
-export async function main(args = process.argv.slice(2), { home = installHome(), serviceFactory = createService, codex = process.env.RIN_CODEX_BIN, codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'), writeConfig, prepare = prepareRelease, switchTo = switchRelease } = {}) {
+export async function main(args = process.argv.slice(2), { home = installHome(), serviceFactory = createService, codex = process.env.RIN_CODEX_BIN, codexHome, writeConfig, prepare = prepareRelease, switchTo = switchRelease, ensureMcp, activateMcp = activateNerveMcp } = {}) {
   const route = routeArgs(args);
   if (route.type === 'codex') {
     const executable = await codexCommand({ binary: codex });
@@ -34,15 +35,17 @@ export async function main(args = process.argv.slice(2), { home = installHome(),
   if (process.env.RIN_MANAGED_DAEMON === '1') throw new Error('Run Rin service management from a separate terminal to avoid stopping its own task.');
   return withInstallLock(home, async () => {
     const state = await readInstall(home);
+    codexHome ||= process.env.CODEX_HOME || state.codexHome || join(homedir(), '.codex');
     const service = serviceFactory({ home, node: state.node });
     if (route.command === 'update') {
       const candidate = await prepare(home, { repository: state.repository, current: state.current });
       const migrate = candidate.changed
         ? (await import(pathToFileURL(join(candidate.release, 'src/install/migrations.mjs')).href)).runUpdateMigrations
         : runUpdateMigrations;
-      await migrate({codexHome,binary:codex,writeConfig});
+      const migration=await migrate({home,codexHome,binary:codex,writeConfig,service,deferActivation:candidate.changed,ensureMcp,activateMcp});
       if (!candidate.changed) { console.log('Rin is already up to date.'); return 0; }
       await switchTo(home, candidate, state, service);
+      await activateMcp({home,service,nerve:migration?.nerve});
       console.log(`Rin updated to ${candidate.sha.slice(0, 12)}.`);
     } else {
       if (route.command !== 'stop') {

@@ -28,9 +28,11 @@ Nerve 是新版 Rin 的事件与注意力组件。代码、部署目录及 MCP �
 
 ## MCP 与接口
 
+全新安装和 `rin update` 自动注册/修复 Nerve MCP；新配置使用空 targets/triggers、独立随机令牌和探测到的空闲本机端口。首次加入服务时自动启动并核对鉴权健康接口；已有账号、目标与触发器不被替换。未配置目标时状态和列表工具可用，事件投递及平台工具仍需用户自己的目标和账号配置。
+
 Git 安装生成稳定入口 `<RIN_HOME>/nerve-mcp-run.mjs`。MCP 配置以 Node 运行此入口，并保留 `NERVE_CONFIG` 指向实际配置；不要将 MCP 绑定到某个 `releases/<sha>` 目录。每次新建 MCP 连接时，入口读取 `install.json.current` 并加载该发布的客户端。`rin update` 后，已有连接继续使用原客户端；重连后使用新版，不需要重启聊天守护进程。
 
-`nerve-mcp.mjs` 从 `NERVE_CONFIG` 读取配置，从相邻 `secrets.json` 读取令牌。服务只监听 `127.0.0.1`，默认9761。MCP提供14个工具：
+`nerve-mcp.mjs` 从 `NERVE_CONFIG` 读取配置，从相邻 `secrets.json` 读取令牌。服务只监听 `127.0.0.1`；手工配置省略端口时使用9761，安装器为新配置选择可用端口。MCP提供14个工具：
 
 - 状态、列出/保存/停用触发器；列出/读取/提交/重试事件。
 - `nerve_read_chat`：按chatKey读取规范记录，可分页，最多200条；`markViewed` 默认 true，只标记返回页。可选 `attentionMode=busy|waiting|idle` 与有界 `attentionForMs`，为当前频道声明一个轻量安全停点；过期后继续采用 Codex 历史中的真实 active 状态。

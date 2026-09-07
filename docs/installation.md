@@ -16,7 +16,7 @@ After preparing and testing a candidate, the installer sets up the selected prod
 
 Product installation uses [official Codex installation guidance](https://learn.chatgpt.com/docs/codex/cli), the [macOS desktop download](https://learn.chatgpt.com/docs/app), the [Windows Store command](https://learn.chatgpt.com/docs/windows/windows-app), and the [supported Linux packages](https://learn.chatgpt.com/docs/linux/linux-app). The current macOS desktop download requires Apple Silicon. Linux desktop packages support the distributions listed in the official guide; the installer rejects unsupported targets before installing a selected product. Existing macOS applications are retained.
 
-FFF is included even when no product is selected. Its binary is downloaded and verified; an existing different `session-history` MCP entry is preserved. The installation needs a usable Codex CLI for `rin` and MCP registration. The launcher can also find the bundled executable in standard macOS ChatGPT/Codex app locations. On other systems, select Codex CLI if an executable is not already available. Sign-in remains an ordinary Codex or ChatGPT interaction.
+FFF and Rin’s Nerve MCP are included even when no product or recommended profile is selected. FFF’s binary is downloaded and verified; an existing different `session-history` MCP entry is preserved. The installation needs a usable Codex CLI for `rin` and MCP registration. The launcher can also find the bundled executable in standard macOS ChatGPT/Codex app locations. On other systems, select Codex CLI if an executable is not already available. Sign-in remains an ordinary Codex or ChatGPT interaction. Nerve gets a private configuration, a fresh authentication token and an available loopback port; its service starts before setup reports success. Initial targets and triggers are empty: no personal accounts, persona task or example credentials are copied. Reconnect existing Codex sessions after registration to load the tools.
 
 ## Layout
 
@@ -27,27 +27,27 @@ The default installation root is `$XDG_DATA_HOME/rin` (or `~/.local/share/rin`) 
 | `source.git/` | Git fetch repository |
 | `releases/<commit>/` | Independently verified source and dependencies |
 | `install.json` | Atomic current/previous version record |
-| `launcher.mjs`, `daemon-run.mjs` | Stable entrypoints |
+| `launcher.mjs`, `daemon-run.mjs`, `nerve-mcp-run.mjs` | Stable entrypoints |
 | `private/daemon.json` | Selected chat and Nerve configuration files |
 | `private/` | Account settings, logs, databases and other local state |
 | `tools/` | Verified FFF binary included with Rin |
 
 Do not edit a prepared release as a development checkout. Develop in a separate clone. Do not commit private configuration or use a real private installation as a test fixture.
 
-## One daemon, only when needed
+## One local daemon
 
 `rin` without a management command launches Codex with the user's cwd, terminal and arguments. The environment is inherited with the selected Node directory added to PATH, so a managed Node installation remains usable in a new terminal. It needs no background Rin process. `rin -- ...` always forwards arguments to Codex. Only the exact leading commands `update`, `start`, `stop`, and `restart` belong to Rin; they accept no extra arguments. Old commands such as `doctor` or `rollback` are not Rin management commands.
 
-The installed daemon combines ChatBridge and Nerve in one Node process. Codex CLI invocations and on-demand MCP processes are external clients/tools, not additional Rin daemons. The service is registered but disabled until there is configured background work:
+The installed daemon combines ChatBridge and Nerve in one Node process. Codex CLI invocations and on-demand MCP processes are external clients/tools, not additional Rin daemons. New installations configure and start Nerve; chat remains unconfigured:
 
 ```json
 {
-  "chat": "/absolute/path/to/private/chat.json",
+  "chat": null,
   "nerve": "/absolute/path/to/private/nerve.json"
 }
 ```
 
-Either value may be `null`. Both default to `null`; `rin start` rejects this empty state. Relative config paths resolve beside `daemon.json`. In a Nerve config, relative database and cwd paths resolve beside that Nerve config. Use absolute paths for attention configuration references and MCP configuration to avoid ambiguity. Chat configuration is described in [chat-bridge.md](chat-bridge.md); Nerve configuration and its MCP registration are described in [nerve.md](nerve.md).
+Either value may be `null`; `rin start` rejects a manually emptied configuration with both set to `null`. Relative config paths resolve beside `daemon.json`. In a Nerve config, relative database and cwd paths resolve beside that Nerve config. Use absolute paths for attention configuration references and MCP configuration to avoid ambiguity. Chat configuration is described in [chat-bridge.md](chat-bridge.md); Nerve configuration and its MCP registration are described in [nerve.md](nerve.md).
 
 macOS uses the user LaunchAgent `com.rin.service`, Linux uses `systemd --user` unit `rin.service`, and Windows uses a `Rin` scheduled task at logon. Start enables automatic startup; stop disables it. Nerve acquires its exclusive loopback port before recovery. Chat shares the existing bridge PID lock, so an old bridge using the same state directory prevents a duplicate start. Startup failure closes already-opened components. Normal daemon shutdown stops chat before Nerve; uncertain external operations retain their conservative recovery semantics. Windows Task Scheduler termination can be abrupt, so pending work may require inspection after restart.
 
@@ -61,13 +61,15 @@ Windows task settings explicitly remove the default execution time limit, allow 
 
 ## Update and failure recovery
 
-`rin update` fetches `main`, requires the new commit to descend from the installed commit, clones a separate candidate, runs `npm ci --ignore-scripts` and the test suite, then runs that verified candidate's idempotent migrations before atomically changing `install.json`. When there is no newer commit, it runs the installed release's migrations. It does not update Codex, ChatGPT, FFF or account configuration; migrations change only explicitly Rin-managed settings such as exact prior AGENTS guidance and obsolete Rin-managed Codex keys. A stopped daemon stays stopped. A running daemon is stopped only for the release switch and restarted; a start failure restores the previous record and attempts to restart that version. No force pull, reset of user work, or npm publication occurs.
+`rin update` fetches `main`, requires the new commit to descend from the installed commit, clones a separate candidate, runs `npm ci --ignore-scripts` and the test suite, then runs that verified candidate's idempotent migrations before atomically changing `install.json`. When there is no newer commit, it still runs migrations, including repair of missing Nerve MCP registration and initial service configuration. It does not update Codex, ChatGPT, FFF or account configuration. Existing Nerve targets, triggers, database paths, ports, tokens, extra MCP settings and explicit MCP disablement are preserved. An unrelated MCP named `nerve`, conflicting configuration paths or invalid existing credentials stop repair with an error instead of being overwritten.
+
+When Nerve is added to an installation for the first time, update starts the local service, or restarts a running chat daemon to load it. Activation is checked through the authenticated Nerve health endpoint; a pending marker remains after failure so the next update can retry. A fully configured service that the user stopped stays stopped. Ordinary release switches restart a running daemon; a start failure restores the previous record and attempts to restart that version. Older updaters that already load candidate migrations perform this repair on the first upgrade, using the candidate path to find even a custom installation root. No force pull, reset of user work, or npm publication occurs.
 
 The install/update lock prevents concurrent switches. A process crash can leave `install.lock`; inspect whether an installer is still running before removing that directory. Previous releases are retained for inspection and manual recovery, without exposing a separate `rin rollback` command. A cutover failure restores renamed old CLI launchers; the error explicitly states if the old service remains stopped. Run service management from a separate terminal rather than from a task owned by the daemon being stopped.
 
 ## Original-session text search
 
-Optional FFF setup pins [upstream release v0.10.6](https://github.com/dmtrKovalenko/fff/releases/tag/v0.10.6) and verifies the selected executable against its upstream SHA-256 digest. The platform matrix covers macOS, GNU/musl Linux and Windows on x64/ARM64. Its `session-history` MCP points only at the user's Codex `sessions` and `archived_sessions` directories via links (directory junctions on Windows). It is not an old-Rin archive importer. An existing different MCP entry is preserved and reported rather than overwritten.
+FFF setup pins [upstream release v0.10.6](https://github.com/dmtrKovalenko/fff/releases/tag/v0.10.6) and verifies the selected executable against its upstream SHA-256 digest. The platform matrix covers macOS, GNU/musl Linux and Windows on x64/ARM64. Its `session-history` MCP points only at the user's Codex `sessions` and `archived_sessions` directories via links (directory junctions on Windows). It is not an old-Rin archive importer. An existing different MCP entry is preserved and reported rather than overwritten.
 
 ## Verification limits
 

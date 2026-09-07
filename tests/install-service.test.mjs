@@ -23,13 +23,14 @@ test('macOS install only writes an escaped disabled LaunchAgent and preserves se
   assert.deepEqual(calls.map(x=>[x.command,x.args]),[['launchctl',['disable','gui/501/com.rin.service']]]);
 });
 
-test('macOS bootstraps an absent job and can restart after stop bootout',async t=>{
+test('macOS bootstraps an idle job, kickstarts it, and can restart after stop bootout',async t=>{
   let present=false,running=false;const calls=[];
-  const run=async(command,args,config)=>{calls.push({command,args,config});if(args[0]==='print')return present?{code:0,stdout:running?'state = running\npid = 42\n':'state = exited\n'}:{code:113,stderr:'Could not find service'};if(args[0]==='bootstrap'){present=true;running=true;}if(args[0]==='bootout'){present=false;running=false;}return {code:0};};
+  const run=async(command,args,config)=>{calls.push({command,args,config});if(args[0]==='print')return present?{code:0,stdout:running?'state = running\npid = 42\n':'state = exited\n'}:{code:113,stderr:'Could not find service'};if(args[0]==='bootstrap')present=true;if(args[0]==='kickstart')running=true;if(args[0]==='bootout'){present=false;running=false;}return {code:0};};
   const {service,userHome}=await fixture(t,'darwin',run);
   await service.start();await service.stop();assert.equal(present,false);await service.start();
   assert.equal(calls.filter(x=>x.args[0]==='bootstrap').length,2);assert.equal(calls.filter(x=>x.args[0]==='bootout').length,1);
   assert.ok(calls.some(x=>x.args[0]==='bootstrap'&&x.args[2]===join(userHome,'Library','LaunchAgents','com.rin.service.plist')));
+  assert.equal(calls.filter(x=>x.args[0]==='kickstart').length,2);
 });
 
 test('macOS loaded job uses kickstart and stop waits for bootout completion',async t=>{

@@ -154,8 +154,10 @@ export function createService({home,node=process.execPath,platform=process.platf
       if(platform==='darwin') {
         if(!uid)throw new Error('macOS service requires a user uid');
         await invoke('launchctl',['enable',`${domain}/${MAC_LABEL}`]);
-        if((await macJob()).present)await invoke('launchctl',['kickstart',`${domain}/${MAC_LABEL}`]);
-        else await invoke('launchctl',['bootstrap',domain,configPath]);
+        if(!(await macJob()).present)await invoke('launchctl',['bootstrap',domain,configPath]);
+        // bootstrap registers a disabled-at-load job but does not reliably start it.
+        // Always request its first run explicitly, just as for an already-loaded job.
+        await invoke('launchctl',['kickstart',`${domain}/${MAC_LABEL}`]);
       } else if(platform==='linux') await invoke('systemctl',['--user','enable','--now',LINUX_UNIT]);
       else await powershell(`Enable-ScheduledTask -TaskName ${ps(WINDOWS_TASK)} | Out-Null;Start-ScheduledTask -TaskName ${ps(WINDOWS_TASK)}`);
       let consecutive=0;

@@ -16,6 +16,22 @@ function uncertain(reason: string, cause?: unknown) {
   return error;
 }
 
+function preSubmit(reason: string, cause: unknown) {
+  const details = cause instanceof Error
+    ? `; cause=${cause.name}${typeof (cause as NodeJS.ErrnoException).code === 'string' ? ` [${(cause as NodeJS.ErrnoException).code}]` : ''}: ${cause.message.slice(0,1024)}`
+    : '';
+  const error: NodeJS.ErrnoException = new Error(`Codex App ${reason}${details}; message was not submitted and may be retried`);
+  error.code = 'CODEX_APP_PRE_SUBMIT';
+  if (cause instanceof Error) error.cause = cause;
+  return error;
+}
+
+function deliveryFailure(stage: string, cause: unknown) {
+  return (cause as NodeJS.ErrnoException | undefined)?.code === 'CODEX_APP_IPC_ERROR'
+    ? preSubmit(`${stage} failed`, cause)
+    : uncertain(`${stage} failed`, cause);
+}
+
 /** Deliver to the existing App owner and wait for the exact acknowledged turn. */
 export class CodexAppExec {
  declare timeoutMs:number; declare stopped:boolean; declare pending:Set<{cancel:()=>void;onEvent:(event:AppEvent)=>void}>; declare submissions:Promise<void>; declare unsubscribe:(()=>void)|null; declare threadId:string|null; declare bridge:BridgeContract;
@@ -92,7 +108,7 @@ export class CodexAppExec {
           stage = 'receipt';
           turnId = receipt.turnId;
           check();
-        } catch (error) { finish(uncertain(`${stage} failed`, error)); }
+        } catch (error) { finish(deliveryFailure(stage, error)); }
       });
     });
   }

@@ -69,16 +69,31 @@ for (const kind of ['failed', 'observerError', 'timeout', 'queued', 'queueError'
 test('App delivery error retains the failing stage and original error metadata', async () => {
   const fixture = setup(async () => {
     const error = new Error('owner discovery returned no client');
-    error.code = 'CODEX_APP_IPC_ERROR';
+    error.code = 'CODEX_APP_IPC_UNCERTAIN';
     throw error;
   });
   await assert.rejects(fixture.runner.run(threadId, { text: 'event' }), error => {
     assert.equal(error.code, 'CODEX_APP_UNCERTAIN');
     assert.match(error.message, /queue failed/);
-    assert.match(error.message, /CODEX_APP_IPC_ERROR/);
+    assert.match(error.message, /CODEX_APP_IPC_UNCERTAIN/);
     assert.match(error.message, /owner discovery returned no client/);
-    assert.match(error.cause?.message || '', /CODEX_APP_IPC_ERROR/);
+    assert.match(error.cause?.message || '', /CODEX_APP_IPC_UNCERTAIN/);
     assert.match(error.cause?.message || '', /owner discovery returned no client/);
+    return true;
+  });
+  await fixture.runner.stop();
+});
+
+test('verified pre-submit IPC errors are explicitly retryable', async () => {
+  const fixture = setup(async () => {
+    const error = new Error('owner discovery returned no client');
+    error.code = 'CODEX_APP_IPC_ERROR';
+    throw error;
+  });
+  await assert.rejects(fixture.runner.run(threadId, { text: 'event' }), error => {
+    assert.equal(error.code, 'CODEX_APP_PRE_SUBMIT');
+    assert.match(error.message, /message was not submitted and may be retried/);
+    assert.doesNotMatch(error.message, /outcome uncertain/);
     return true;
   });
   await fixture.runner.stop();
@@ -105,6 +120,25 @@ test('Nerve app target preserves one session, prompt and no automatic retry', as
   assert.equal(store.event('e').state, 'uncertain');
   await nerve.close();
   store.close();
+});
+
+test('Nerve retries only the verified App pre-submit classification', async () => {
+  const target = { type: 'codex-app', threadId };
+  for (const [code, state] of [['CODEX_APP_PRE_SUBMIT', 'pending'], ['CODEX_APP_UNCERTAIN', 'uncertain']]) {
+    const store = new Store(':memory:');
+    const nerve = new Nerve({ targets: { main: target } }, store);
+    const error = new Error('classified failure');
+    error.code = code;
+    nerve.codex = { run: async () => { throw error; }, stop: async () => {} };
+    store.enqueue(`event-${code}`, 'main', { prompt: 'prompt content' });
+    await nerve.tick();
+    await Promise.all([...nerve.running]);
+    const event = store.event(`event-${code}`);
+    assert.equal(event.state, state);
+    assert.equal(event.attempts, 1);
+    await nerve.close();
+    store.close();
+  }
 });
 
 test('second owner event is submitted before first completion and shares its observer and turn', async () => {

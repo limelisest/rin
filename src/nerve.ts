@@ -266,7 +266,14 @@ export class Nerve {
     let task: Promise<void>;
     task=Promise.resolve().then(async () => {
       try { const result=await this.deliver(event);this.store.finish(event.id,result);log('delivered',{id:event.id,target:event.target}); }
-      catch(e: unknown) { const target=this.config.targets[event.target];this.store.fail(event,(e as Error).message,!['codex','codex-app'].includes(target?.type) && target?.idempotent === true,target?.maxAttempts || 3);log('delivery_failed',{id:event.id,error:(e as Error).message}); }
+      catch(e: unknown) {
+        const target=this.config.targets[event.target];
+        const retry = target?.type === 'codex-app'
+          ? (e as NodeJS.ErrnoException).code === 'CODEX_APP_PRE_SUBMIT'
+          : !['codex','codex-app'].includes(target?.type) && target?.idempotent === true;
+        this.store.fail(event,(e as Error).message,retry,target?.maxAttempts || 3);
+        log('delivery_failed',{id:event.id,error:(e as Error).message});
+      }
     }).finally(() => {
       this.running.delete(task);
       if (!isApp) this.serialRunning=false;

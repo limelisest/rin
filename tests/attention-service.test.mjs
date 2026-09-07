@@ -117,13 +117,46 @@ test('mentions and explicitly awaited replies are prioritized without making eve
   assert.equal(service.state().pending[0].reason,'mentioned');assert.equal(service.state().pending[0].priority,100);
 });
 
-test('pending and running attention events suppress duplicate wakeups while unread remains queued',t=>{
+test('a durable attention receipt suppresses duplicate wakeups while unread remains queued',t=>{
+ const {service,store}=setup(t);service.accept(record());
+ const first=service.scan(at+30000);assert.equal(first.emitted,true);assert.equal(service.state().pending.length,1);
+ assert.equal(service.scan(at+330000).suppressed,true);
+ const event=store.claim(at+30000);assert.equal(event.source,'chat-attention');assert.equal(service.scan(at+330000).suppressed,true);
+ store.finish(event.id,{ok:true});
+ assert.equal(service.scan(at+330000).suppressed,true);assert.equal(store.status().length,1);
+});
+
+test('a completed attention receipt suppresses an overdue unread item even while the persona is active',t=>{
+ const {service,store}=setup(t);service.accept(record());
+ const first=service.scan(at+30000);const event=store.claim(at+30000);store.finish(event.id,{ok:true});
+ assert.equal(service.scan(at+330000,{active:true}).suppressed,true);
+ assert.equal(store.status().length,1);assert.equal(service.state().pending.length,1);
+});
+
+test('uncertain and failed attention receipts suppress a duplicate but retain the original retry path',t=>{
+ for (const settle of [
+  (store,event)=>store.fail(event,'outcome unknown',false),
+  (store,event)=>store.fail(event,'retry exhausted',true,1),
+ ]) {
   const {service,store}=setup(t);service.accept(record());
-  const first=service.scan(at+30000);assert.equal(first.emitted,true);assert.equal(service.state().pending.length,1);
-  assert.equal(service.scan(at+330000).suppressed,true);
-  const event=store.claim(at+30000);assert.equal(event.source,'chat-attention');assert.equal(service.scan(at+330000).suppressed,true);
-  store.finish(event.id,{ok:true});
-  assert.equal(service.scan(at+330000).emitted,true);
+  const first=service.scan(at+30000);const event=store.claim(at+30000);settle(store,event);
+  assert.equal(service.scan(at+330000,{active:true}).suppressed,true);assert.equal(store.status().length,1);
+  assert.equal(store.retry(first.id),1);assert.equal(store.claim()?.id,first.id);
+ }
+});
+
+test('a cancelled receipt does not suppress an unnotified message',t=>{
+ const {service,store}=setup(t);service.accept(record());
+ store.enqueue('cancelled','main',{messageIds:['a']},at,'chat-attention');
+ store.db.prepare("UPDATE events SET state='cancelled' WHERE id='cancelled'").run();
+ const next=service.scan(at+30000);assert.equal(next.emitted,true);assert.deepEqual(store.event(next.id).payload.messageIds,['a']);
+});
+
+test('an old attention receipt suppresses only its message and a new message gets its own event',t=>{
+ const {service,store}=setup(t);service.accept(record());
+ const first=service.scan(at+30000);const event=store.claim(at+30000);store.finish(event.id,{ok:true});
+ service.accept(record({id:'b',messageId:'124',receivedAt:new Date(at+40000).toISOString()}));
+ const next=service.scan(at+70000);assert.equal(next.emitted,true);assert.deepEqual(store.event(next.id).payload.messageIds,['b']);
 });
 
 test('channel policy and bounded attention mode override the detected busy state',t=>{

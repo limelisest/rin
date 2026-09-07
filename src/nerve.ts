@@ -83,7 +83,15 @@ export class Store {
     } catch(e: unknown) {this.db.exec('ROLLBACK');throw e;}
   }
   cancelSource(id: string) { return this.db.prepare("UPDATE events SET state='cancelled',updated=? WHERE source=? AND state='pending'").run(Date.now(),id).changes; }
-  lastSlot(id: string) { return this.db.prepare('SELECT last_slot FROM checks WHERE id=?').get(id)?.last_slot; }
+  lastSlot(id: string) {
+    const current = this.db.prepare('SELECT last_slot FROM checks WHERE id=?').get(id)?.last_slot;
+    if (current) return current;
+    // Releases before the stable cursor used id@revision.  Read the newest
+    // legacy cursor once so an upgrade does not replay the current slot.
+    return this.db.prepare(`SELECT last_slot FROM checks
+      WHERE substr(id,1,length(?)+1)=? || '@'
+      ORDER BY CAST(substr(id,length(?)+2) AS INTEGER) DESC LIMIT 1`).get(id,id,id)?.last_slot;
+  }
   markSlot(id: string, slot: string) { this.db.prepare('INSERT INTO checks VALUES(?,?) ON CONFLICT(id) DO UPDATE SET last_slot=excluded.last_slot').run(id,slot); }
   close() { this.db.close(); }
 }
@@ -178,7 +186,10 @@ export class Nerve {
       if (this.stopping) break;
       if (trigger.enabled === false) continue;
       const slot = scheduleSlot(trigger,now);
-      const checkId=trigger.managed ? `${trigger.id}@${trigger.revision}` : trigger.id;
+      // A trigger definition revision invalidates only pending work.  Its
+      // schedule cursor is the trigger identity, otherwise an edit replays
+      // an already-consumed daily/at slot.
+      const checkId=trigger.id;
       if (slot === null || this.store.lastSlot(checkId) === slot) continue;
       try {
         let payload = trigger.payload ?? {}, key = slot, ready = true;

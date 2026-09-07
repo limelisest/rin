@@ -102,9 +102,30 @@ test('managed trigger edits persist, dedupe unchanged definitions and cancel sta
  assert.equal(n.upsertTrigger(t).changed,true);await n.scan(10000);assert.equal(store.status().length,1);
  assert.equal(n.upsertTrigger({...t}).changed,false);await n.scan(10000);assert.equal(store.status().length,1);
  n.upsertTrigger({...t,payload:{v:2}});assert.equal(store.status()[0].state,'cancelled');await n.scan(10000);
+ assert.equal(store.status().filter(e=>e.state==='pending').length,0);await n.scan(20000);
  assert.equal(store.status().filter(e=>e.state==='pending').length,1);
  n.disableTrigger('watch');assert.equal(store.status().filter(e=>e.state==='pending').length,0);
- store.close();store=new Store(path);n=new Nerve(config,store);assert.equal(n.triggers()[0].enabled,false);await n.scan(20000);assert.equal(store.status().length,2);store.close();rmSync(dir,{recursive:true});
+ store.close();store=new Store(path);n=new Nerve(config,store);assert.equal(n.triggers()[0].enabled,false);await n.scan(30000);assert.equal(store.status().length,2);store.close();rmSync(dir,{recursive:true});
+});
+test('managed daily and at edits or enabled toggles do not replay an already-consumed slot',async()=>{
+ for (const [id,schedule,now,slot] of [
+  ['daily-once',{daily:'09:00',timeZone:'UTC'},Date.parse('2026-09-07T09:00:00Z'),'2026-09-07'],
+  ['at-once',{at:'2026-09-07T09:00:00Z'},Date.parse('2026-09-07T09:01:00Z'),'2026-09-07T09:00:00Z'],
+ ]) {
+  const store=new Store(':memory:');const n=new Nerve({targets:{out:{type:'command',argv:['true']}}},store);
+  const trigger={id,target:'out',...schedule,payload:{version:1}};
+  n.upsertTrigger(trigger);await n.scan(now);assert.equal(store.status().length,1);assert.equal(store.lastSlot(id),slot);
+  n.upsertTrigger({...trigger,payload:{version:2}});await n.scan(now);assert.equal(store.status().length,1);
+  n.disableTrigger(id);n.upsertTrigger({...trigger,enabled:true,payload:{version:3}});await n.scan(now);assert.equal(store.status().length,1);
+  if (id==='daily-once') {await n.scan(now+86_400_000);assert.equal(store.status().length,2);}
+  store.close();
+ }
+});
+test('stable cursors read the newest revision-keyed cursor left by an older release',async()=>{
+ const store=new Store(':memory:');store.markSlot('legacy@2','2026-09-07T08:00:00Z');store.markSlot('legacy@4','2026-09-07T09:00:00Z');
+ const n=new Nerve({targets:{out:{type:'command',argv:['true']}}},store);
+ n.upsertTrigger({id:'legacy',target:'out',at:'2026-09-07T09:00:00Z'});await n.scan(Date.parse('2026-09-07T09:01:00Z'));
+ assert.equal(store.status().length,0);assert.equal(store.lastSlot('legacy'),'2026-09-07T09:00:00Z');store.close();
 });
 test('disabling a trigger during an asynchronous condition check does not enqueue work',async()=>{
  const store=new Store(':memory:');const n=new Nerve({targets:{out:{type:'command',argv:['true']}}},store);

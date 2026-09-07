@@ -92,9 +92,13 @@ export class AttentionService {
   scan(now = Date.now(), {active=false} = {}) {
     return this.transaction(()=>{
       const state = this.state();
-      const inFlight = this.db.prepare("SELECT payload FROM events WHERE source='chat-attention' AND target=? AND state IN ('pending','running')").all(this.config.target);
+      // An attention event is a durable notification receipt, not an
+      // instruction to retry until its messages are read.  Pending remains
+      // the unread ledger; every non-cancelled event keeps its exact message
+      // identities from being signalled again.
+      const notified = this.db.prepare("SELECT payload FROM events WHERE source='chat-attention' AND target=? AND state <> 'cancelled'").all(this.config.target);
       const notifiedMessageIds = new Set<string>();
-      for (const row of inFlight) {
+      for (const row of notified) {
         const payload = JSON.parse(row.payload as string);
         if (Array.isArray(payload.messageIds)) {
           for (const id of payload.messageIds) notifiedMessageIds.add(id);

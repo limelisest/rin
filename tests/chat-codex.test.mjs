@@ -80,6 +80,10 @@ input.on('line', line => {
     process.stdout.write(JSON.stringify({ method: 'thread/started', params: { thread: { id: 'new-thread' } } }) + '\\n');
     return reply({ thread: { id: 'new-thread' } });
   }
+  if (message.method === 'thread/inject_items') {
+    if (mode === 'inject-lost') return process.exit(7);
+    return mode === 'inject-error' ? error() : reply({});
+  }
   if (message.method === 'thread/name/set') return mode === 'name-error' ? error() : reply({});
   throw new Error('Unexpected method: ' + message.method);
 });
@@ -98,9 +102,13 @@ test('creates and names a persistent thread without starting a turn and closes i
   const [processCall, ...calls] = await f.calls();
   assert.deepEqual(processCall.args, ['app-server', '--stdio']);
   assert.equal(processCall.home, f.dir);
-  assert.deepEqual(calls.map(call => call.method), ['initialize', 'initialized', 'thread/start', 'thread/name/set']);
+  assert.deepEqual(calls.map(call => call.method), ['initialize', 'initialized', 'thread/start', 'thread/inject_items', 'thread/name/set']);
+  assert.equal(calls[0].params.capabilities.experimentalApi, true);
   assert.deepEqual(calls[2].params, { cwd: f.dir, model: 'selected-model', ephemeral: false });
-  assert.deepEqual(calls[3].params, { threadId: 'new-thread', name: '频道 $(literal)' });
+  assert.deepEqual(calls[3].params, { threadId: 'new-thread', items: [{ type: 'message', role: 'developer', content: [{ type: 'input_text', text:
+    'This task receives messages through the Rin chat bridge. Ordinary assistant replies are automatically delivered to the bound chat; do not send a second copy with external messaging tools.',
+  }] }] });
+  assert.deepEqual(calls[4].params, { threadId: 'new-thread', name: '频道 $(literal)' });
   assert.equal(f.bridge.children.size, 0);
   assert.throws(() => process.kill(processCall.pid, 0), { code: 'ESRCH' });
 });
@@ -112,13 +120,13 @@ test('creation omits optional configuration and validates before launching', asy
   await assert.rejects(f.bridge.createThread({ cwd: f.dir, name: null }), /name required/);
   assert.equal(await f.bridge.createThread({ cwd: '.' }), 'new-thread');
   const [, ...calls] = await f.calls();
-  assert.deepEqual(calls.map(call => call.method), ['initialize', 'initialized', 'thread/start']);
+  assert.deepEqual(calls.map(call => call.method), ['initialize', 'initialized', 'thread/start', 'thread/inject_items']);
   assert.deepEqual(calls[2].params, { cwd: process.cwd(), ephemeral: false });
   await f.bridge.stop();
   await assert.rejects(f.bridge.createThread({ cwd: f.dir }), /not started/);
 });
 
-for (const mode of ['initialize-error', 'start-error', 'lost', 'missing-id', 'hang', 'name-error']) {
+for (const mode of ['initialize-error', 'start-error', 'lost', 'missing-id', 'hang', 'inject-error', 'inject-lost', 'name-error']) {
   test(`thread creation ${mode} preserves uncertainty and closes without replay`, async t => {
     const f = await creationFixture(t, mode, mode === 'hang' ? 250 : 2_000);
     await assert.rejects(f.bridge.createThread({ cwd: f.dir, name: 'optional title' }), error => {

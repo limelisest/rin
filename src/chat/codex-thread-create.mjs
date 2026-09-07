@@ -76,7 +76,7 @@ export function createCodexThread({ command, codexHome, timeoutMs, children, cwd
       try {
         await request('initialize', {
           clientInfo: { name: 'rin-chat', title: 'Rin chat', version: '1' },
-          capabilities: { experimentalApi: false, requestAttestation: false },
+          capabilities: { experimentalApi: true, requestAttestation: false },
         });
         if (settled) return;
         child.stdin.write(`${JSON.stringify({ method: 'initialized' })}\n`);
@@ -84,7 +84,16 @@ export function createCodexThread({ command, codexHome, timeoutMs, children, cwd
         if (typeof result?.thread?.id !== 'string' || !result.thread.id.trim()) {
           throw new Error('Codex thread creation returned no thread ID');
         }
-        threadId = result.thread.id;
+        // An empty thread/start is not durably resumable after this client exits.
+        // Persist the bridge's routing contract without a user message or turn.
+        // Only expose a usable ID after this write has been acknowledged.
+        const createdId = result.thread.id;
+        await request('thread/inject_items', { threadId: createdId, items: [{
+          type: 'message', role: 'developer', content: [{ type: 'input_text', text:
+            'This task receives messages through the Rin chat bridge. Ordinary assistant replies are automatically delivered to the bound chat; do not send a second copy with external messaging tools.',
+          }],
+        }] });
+        threadId = createdId;
         if (name) await request('thread/name/set', { threadId, name });
         finish(null, threadId);
       } catch (error) { finish(error); }

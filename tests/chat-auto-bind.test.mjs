@@ -1,10 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {ChatBridge} from '../src/chat/bridge.mjs';
 import {validateConfig} from '../src/chat/policy.mjs';
+
+test('shipped chat template enables lazy binding without enabling adapters',()=>{
+ const config=JSON.parse(readFileSync(new URL('../examples/chat.json',import.meta.url),'utf8'));
+ validateConfig(config);
+ assert.equal(config.bindings.length,0);
+ assert.ok(config.adapters.length > 0);
+ for(const adapter of config.adapters){
+  assert.equal(adapter.enabled,false);
+  assert.deepEqual(adapter.allowUsers,[]);
+  assert.deepEqual(adapter.autoBind,{cwd:'/absolute/path/to/chat-workspace'});
+ }
+});
 
 const message=(chatId,id='1',extra={})=>({id,chatId,kind:'group',userId:'owner',mentioned:true,text:'hello',...extra});
 function fixture(t,createThread) {

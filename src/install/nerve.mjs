@@ -5,7 +5,7 @@ import {basename,dirname,isAbsolute,join,relative,resolve} from 'node:path';
 import {createServer} from 'node:net';
 import {atomicJSON,codexCommand,run as coreRun} from './core.mjs';
 import {createCodexConfigWriter} from './profile.mjs';
-import {validateConfig} from '../nerve.mjs';
+import {validateConfig} from '../nerve-config.mjs';
 
 async function readOptional(file) {
   try { return JSON.parse(await readFile(file,'utf8')); }

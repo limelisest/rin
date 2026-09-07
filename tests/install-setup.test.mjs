@@ -187,6 +187,15 @@ test('setup CLI reports the non-interactive preflight failure once', async () =>
   assert.equal(result.stderr, 'Run the installer in an interactive terminal\n');
 });
 
+test('installer and CLI imports do not require the SQLite runtime', async () => {
+  const modules=['src/install/setup.mjs','src/install/migrations.mjs','src/install/nerve.mjs','src/cli.mjs'];
+  const source=modules.map(file=>`await import(${JSON.stringify(pathToFileURL(resolve(file)).href)});`).join('\n');
+  const result=await runEntry(['--no-experimental-sqlite','--input-type=module','--eval',source]);
+  assert.equal(result.code,0,result.stderr);
+  assert.equal(result.stdout,'');
+  assert.equal(result.stderr,'');
+});
+
 test('setup CLI reports an existing installation before starting prompts', async t => {
   const home = await temporary(t), entry = resolve('src/install/setup.mjs');
   await writeFile(join(home, 'install.json'), '{}');

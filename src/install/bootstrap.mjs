@@ -1,4 +1,4 @@
-import {readFile} from 'node:fs/promises';
+import {readFile,realpath} from 'node:fs/promises';
 import {dirname,resolve,join} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {findNpmCli,run} from './core.mjs';
@@ -17,7 +17,7 @@ export async function bootstrap() {
   const {setup} = await import('./setup.mjs');
   await setup();
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) bootstrap().catch(error => {
+if (process.argv[1] && import.meta.url === pathToFileURL(await realpath(process.argv[1])).href) bootstrap().catch(error => {
   if (error.code !== 'INSTALL_CANCELLED') console.error(error.message);
   process.exitCode = 1;
 });

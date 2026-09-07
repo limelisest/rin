@@ -18,7 +18,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { admitted } from '../policy.js';
-import { COMMANDS, parseCommand } from '../commands.js';
+import { COMMANDS, parseCommand, parseCommandText } from '../commands.js';
 
 const capabilities = Object.freeze({ edit: false, delete: true, typing: false, maxText: 4000 });
 
@@ -104,14 +104,19 @@ export function createAdapter(config: OneBotConfig, context: AdapterContext) {
     const parts = segments(event.message);
     const text = parts.filter((part) => part.type === 'text').map((part) => part.data?.text || '').join('').trim();
     // Admission deliberately precedes URL downloads and get_file calls.
-    if (!admitted({...config,type:'onebot'},userId,kind,{command:Boolean(parseCommand(text,commands))})) return;
+    const parsed = parseCommandText(text,commands);
+    const selfId = String(event.self_id || '').toLowerCase();
+    const commandTarget = parsed?.target ? (selfId && parsed.target === selfId ? 'self' : 'other') : undefined;
+    const command = Boolean(parseCommand(text,commands,commandTarget));
+    if (!admitted({...config,type:'onebot'},userId,kind,{command})) return;
     const mentioned = parts.some((part) => part.type === 'at' && String(part.data?.qq) === String(event.self_id));
-    if (kind === 'group' && config.requireMention !== false && !mentioned) return;
+    if (kind === 'group' && config.requireMention !== false && !mentioned && !command) return;
     const reply = parts.find((part) => part.type === 'reply')?.data?.id;
     const envelope: ChatMessage = {
       id: String(event.message_id), chatId: String(kind === 'group' ? event.group_id : event.user_id), userId, kind,
       mentioned,
       text, files: [],
+      ...(commandTarget ? { commandTarget } : {}),
       ...(reply == null ? {} : { replyTo: String(reply) }),
     };
     if (context.isBound && !await context.isBound(envelope)) return;

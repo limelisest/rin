@@ -122,8 +122,9 @@ export function createAdapter(config: QQConfig, context: AdapterContext) {
         const kind = msg.kind === 'group' ? 'group' : 'dm';
         const userId = String(msg.senderId);
         const text = String(msg.content || '').trim();
+        const command = Boolean(parseCommand(text,commands));
         // Admission deliberately precedes every attachment fetch.
-        if (!admitted({...config,type:'qqbot'},userId,kind,{command:Boolean(parseCommand(text,commands))})) {
+        if (!admitted({...config,type:'qqbot'},userId,kind,{command})) {
           context.log?.info?.('QQ message rejected by admission', {
             adapter: config.id, userId, kind,
             chatId: String(msg.kind === 'group' ? msg.groupOpenid : msg.senderId),
@@ -131,7 +132,7 @@ export function createAdapter(config: QQConfig, context: AdapterContext) {
           return;
         }
         const mentioned = msg.kind !== 'group' || /AT_MESSAGE_CREATE/.test(msg.rawEventType || '') || (msg.mentions?.length || 0) > 0;
-        if (msg.kind === 'group' && config.requireMention !== false && !mentioned) {
+        if (msg.kind === 'group' && config.requireMention !== false && !mentioned && !command) {
           context.log?.info?.('QQ message ignored: mention required', {userId,kind});
           return;
         }

@@ -4,7 +4,7 @@ type AutoBindingState = {state: 'bound'; binding: Binding} | {state: 'creating' 
 type AutoBindings = Record<string, AutoBindingState>;
 interface Segments { current: number; questions: string[]; items: Record<string, number>; groups: string[]; }
 const failure = (error: unknown) => error as {threadId?: string; code?: string; cause?: {code?: string}; fallbackSafe?: boolean; deliveryUncertain?: boolean};
-import { COMMANDS, parseCommand, builtinCommands, commandHelp } from './commands.js';
+import { COMMANDS, parseCommandText, builtinCommands, commandHelp } from './commands.js';
 import { loadCommandExtensions } from './command-extensions.js';
 import { executeUsage } from './usage.js';
 import { resolve } from 'node:path';
@@ -74,8 +74,8 @@ export class ChatBridge {
         setCursor: (key,value) => this.store.setCursor(key,value),
         observeDiscord: this.attention ? record => this.attention!.observe(record) : undefined,
         commands: this.commands,
-        isCommand: message => Boolean(parseCommand(message.text,this.commands)),
-        isBound: message => Boolean(parseCommand(message.text,this.commands)) || (!(this.attention && config.type==='discord') && (this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind) || this.canAutoBind(config,message))),
+        isCommand: message => Boolean(parseCommandText(message.text,this.commands)),
+        isBound: message => Boolean(parseCommandText(message.text,this.commands)) || (!(this.attention && config.type==='discord') && (this.config.bindings.some(b=>b.adapter===config.id && String(b.chatId)===String(message.chatId) && b.kind===message.kind) || this.canAutoBind(config,message))),
       });
       this.adapters.set(config.id, adapter);
 
@@ -94,7 +94,7 @@ export class ChatBridge {
     await this.submit();
   }
   async receive(config: AdapterConfig, message: ChatMessage) {
-    if (!allowed(config,message,{command:Boolean(parseCommand(message.text,this.commands))})) return;
+    if (!allowed(config,message,{command:Boolean(parseCommandText(message.text,this.commands))})) return;
     if(await this.command(config,message))return;
     let binding;
     try { binding=await this.ensureBinding(config,message); }
@@ -155,8 +155,12 @@ export class ChatBridge {
     throw new Error('Unknown built-in command');
   }
   async command(config: AdapterConfig,message: ChatMessage) {
-    const parsed=parseCommand(message.text,this.commands);
+    const parsed=parseCommandText(message.text,this.commands);
     if(!parsed)return false;
+    // This was deliberately removed from the old catalog. It remains silent,
+    // including in a private chat, rather than being submitted as a prompt.
+    if(parsed.name==='session')return true;
+    if(!parsed.registered || (parsed.target && message.commandTarget!=='self'))return this.unknownCommand(config,message);
     const command=this.commands.find(c=>c.name===parsed.name)!;
     // Admission is the only caller permission check. Claim before every handler.
     const key=`command:${stableId(config.id,message.chatId,message.id)}`;
@@ -185,9 +189,22 @@ export class ChatBridge {
     // Native interaction replies are one private response; adapters retain the handle in memory.
     const parts=message.commandInteraction?[{text:output.text,...(output.fallbackText?{fallbackText:output.fallbackText}:{}),...(output.files?.length?{files:output.files}:{})}]
       : [...chunks,...(output.files?.length?[{files:output.files,...(output.fallbackText?{fallbackText:output.fallbackText}:{})}]:[])];
-    for(const [index,part] of parts.entries())this.store.stage(stableId(key,index),JSON.stringify([config.id,String(message.chatId)]),{...part,target});
+    for(const [index,part] of parts.entries())this.store.stage(stableId(key,index),JSON.stringify([config.id,String(message.chatId)]),{
+      ...part,...(!message.commandInteraction && index===0?{replyTo:message.id}:{}),target});
     this.store.setCursor(key,{state:'done'});
     if(message.commandInteraction)await this.flush();
+    return true;
+  }
+  unknownCommand(config: AdapterConfig,message: ChatMessage) {
+    if(message.kind!=='dm')return true;
+    const key=`unknown-command:${stableId(config.id,message.chatId,message.id)}`;
+    if(this.store.cursor(key))return true;
+    this.store.setCursor(key,{state:'started'});
+    this.store.stage(stableId(key,0),JSON.stringify([config.id,String(message.chatId)]),{
+      text:'Unknown command. Send /help to see available commands.',replyTo:message.id,
+      target:{chatId:message.chatId,kind:message.kind,userId:message.userId,messageId:message.id},
+    });
+    this.store.setCursor(key,{state:'done'});
     return true;
   }
 

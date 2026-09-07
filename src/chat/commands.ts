@@ -4,9 +4,24 @@ export const COMMANDS = Object.freeze([
   {name:'help',description:'Show available commands'},
   {name:'usage',description:'Show account usage',argument:'Options: current, history, card, text, --help'},
 ]);
-export function parseCommand(text: unknown, commands: readonly CommandDescriptor[] = COMMANDS) {
-  const match=/^\/([a-z][a-z0-9_]*)(?:@[\w]+)?(?:\s+([\s\S]*))?$/.exec(String(text || '').trim());
-  return match && commands.some(c=>c.name===match[1]) ? {name:match[1],args:(match[2] || '').trim()} : null;
+export interface ParsedCommandText { commandLike: true; name: string; args: string; target?: string; registered: boolean; }
+
+// Text that begins with a slash is not necessarily a registered command. Keep
+// that distinction so unknown commands can never become ordinary chat prompts.
+export function parseCommandText(text: unknown, commands: readonly CommandDescriptor[] = COMMANDS): ParsedCommandText | null {
+  const source=String(text || '').trim();
+  if(!source.startsWith('/'))return null;
+  const match=/^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(source);
+  if(!match || !match[1])return null;
+  const at=match[1].indexOf('@');
+  const name=(at<0?match[1]:match[1].slice(0,at)).toLowerCase();
+  const target=at<0?'':match[1].slice(at+1).toLowerCase();
+  return {commandLike:true,name,args:(match[2] || '').trim(),...(target?{target}:{}),registered:commands.some(command=>command.name===name)};
+}
+
+export function parseCommand(text: unknown, commands: readonly CommandDescriptor[] = COMMANDS, commandTarget?: 'self' | 'other') {
+  const parsed=parseCommandText(text,commands);
+  return parsed?.registered && (!parsed.target || commandTarget==='self') ? {name:parsed.name,args:parsed.args} : null;
 }
 export function builtinCommands(run: (name: string, context: CommandContext) => ChatOutput | Promise<ChatOutput>): ChatCommand[] {
   return COMMANDS.map(command=>({...command,run:context=>run(command.name,context)}));

@@ -53,19 +53,21 @@ export function normalizeTelegramUpdate(update: Update, config: TelegramConfig, 
   }
   text = text.trim();
   const commandMatch = /^\/([a-z0-9_]+)(?:@([a-z0-9_]+))?(?=\s|$)/i.exec(text);
+  let commandTarget: 'self' | 'other' | undefined;
   if (commandMatch) {
     const target = String(commandMatch[2] || '').toLowerCase();
-    if (target && (!username || target !== username)) return null;
-    if (commands.some(command => command.name === commandMatch[1].toLowerCase())) {
+    if (target) commandTarget = username && target === username ? 'self' : 'other';
+    if (commands.some(command => command.name === commandMatch[1].toLowerCase()) && commandTarget !== 'other') {
       if (target) mentioned = true;
       text = `/${commandMatch[1].toLowerCase()}${text.slice(commandMatch[0].length)}`;
     }
   }
-  const recognizedCommand = Boolean(parseCommand(text,commands));
+  const recognizedCommand = Boolean(parseCommand(text,commands,commandTarget));
   if (!userId || !admitted({...config,type:'telegram'},userId,kind,{command:recognizedCommand})) return null;
-  if (kind === 'group' && (config.requireMention ?? true) && !mentioned) return null;
+  if (kind === 'group' && (config.requireMention ?? true) && !mentioned && !recognizedCommand) return null;
   return {id: String(message.message_id), chatId: String(message.chat.id), userId, kind, mentioned,
     text: text.trim(), replyTo: message.reply_to_message?.message_id ? String(message.reply_to_message.message_id) : undefined,
+    ...(commandTarget ? {commandTarget} : {}),
     descriptor: fileDescriptor(message)};
 }
 

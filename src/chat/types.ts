@@ -1,6 +1,6 @@
 export type ChatKind = 'dm' | 'group';
 export interface FileAttachment { path: string; name?: string; mimeType?: string; }
-export interface ChatMessage { adapter?: string; replyTo?: string; commandInteraction?: {id: string}; id: string; chatId: string; userId: string; kind: ChatKind; text: string; files?: FileAttachment[]; mentioned?: boolean; chatName?: string; userName?: string; }
+export interface ChatMessage { adapter?: string; replyTo?: string; commandInteraction?: {id: string}; commandTarget?: 'self' | 'other'; id: string; chatId: string; userId: string; kind: ChatKind; text: string; files?: FileAttachment[]; mentioned?: boolean; chatName?: string; userName?: string; }
 export interface ChatTarget { commandInteraction?: {id: string}; chatId: string; kind?: ChatKind; userId?: string; messageId?: string; }
 export interface ChatOutput { text?: string; files?: FileAttachment[]; editId?: string; replyTo?: string; target?: ChatTarget; delete?: boolean; progress?: boolean; fallbackText?: string; parseMode?: string; }
 export interface Binding extends ChatTarget { adapter: string; threadId: string; kind: ChatKind; mirror: boolean; }

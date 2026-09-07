@@ -60,7 +60,7 @@ Telegram `telegram.js:704` 直接对 HTML 字符串调用 `splitPlainText(...,40
 另外读取旧扩展仓库 `rinchan-hoshino/rin-extensions` 的 `extensions/lark-platform.ts` 和 `extensions/onebot-platform.ts`（本机 HEAD `3c3b14b`），并核对私人旧开发原文。飞书此前虽实现 edit API，却被共享进度逻辑的平台名白名单排除；QQ/OneBot则把没有 `done` 标记的完整公开快照误作增量缓冲。
 
 - 编辑布局现按适配器 `capabilities.edit` 选择。飞书共享静态 Working、最新纯文本摘要、分隔符、quote 分槽、错误保留进度与 final 清理，不再只覆盖 Discord/Telegram。
-- 飞书旧实现发送 `post`，新版此前错误地发送普通 `text`。已将旧纯 Markdown→post 函数直接剥离到 `src/chat/feishu-presentation.ts`，保留行内样式、链接、代码块、列表 Markdown 和空行，send/edit 使用同一转换；媒体首条也能回复原消息。
+- 飞书旧实现发送 `post`，新版此前错误地发送普通 `text`。已将旧纯 Markdown→post 函数直接剥离到 `src/chat/feishu-presentation.ts`，保留行内样式、链接、代码块、列表 Markdown 和空行；不可变快照发送与媒体首条引用都使用这一呈现。
 - QQ/OneBot 不支持 edit。完整公开快照立即发送，非 final 以 `... ` 开头，Markdown 用旧纯文本规则降级。相同 item+内容跨重启去重，快照改写用独立新消息，不拿远端消息 ID 调不存在的 edit；真正 delta 仍等完整边界。正文、媒体、正文保持顺序，引用归属冻结至本轮。
 - OneBot 媒体恢复旧扩展的 `image`/`record`/`video` 类型和 `base64://` 上传，避免把 Rin 本机路径交给另一台网关。普通文件使用旧 `upload_private_file`/`upload_group_file` 扩展；这不是所有 v11 实现保证支持的接口，且无法携带 reply segment。失败不会盲目另发回退消息。
 

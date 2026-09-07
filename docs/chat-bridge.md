@@ -36,13 +36,13 @@ QQ 官方平台使用 OpenID，不能把普通 QQ 数字号或 OneBot 用户 ID 
 | Telegram | getUpdates | 有，共享进度槽与最终清理 | 有 | 图片与文件 |
 | QQ 官方 | 官方 SDK WebSocket | 无，发送完整消息快照 | 仅 C2C | SDK 图片/语音/视频/文件接口 |
 | OneBot v11 | 正向 WebSocket，可选 HTTP action | 无；可删除 | 无标准能力 | base64 媒体；普通文件依赖扩展 action |
-| 飞书 | 官方 SDK 长连接 | 有 | 无 | post、图片与文件 |
+| 飞书 | 官方 SDK 长连接 | 无，发送完整消息快照 | 无 | post、图片与文件 |
 
 QQ 官方回复受被动消息时限和额度限制，不能随意去掉 msg_id 改为主动群消息。OneBot 不绑定 NapCat；其普通文件上传 action 并非所有 v11 实现都支持。完整实测边界见 [能力审计](chat-parity-audit.md)，不能用连接成功替代端到端验收。
 
 ## 恢复与运行
 
-SQLite 保存入站去重、平台游标、队列回执、公开消息缓冲、引用上下文和发件箱。已知远端 ID 的编辑可以退避重试；首次发送或入站提交若结果不确定，记录 `uncertain`，需要核对外部效果后再处理。重启恢复观察游标及未结束文字缓冲，不盲目重放。
+SQLite 保存入站去重、平台游标、队列回执、公开消息缓冲、引用上下文和发件箱。支持编辑的平台会对已知远端 ID 退避重试；首次发送或入站提交若结果不确定，记录 `uncertain`，需要核对外部效果后再处理。重启恢复观察游标及未结束文字缓冲，不盲目重放。
 
 QQ 诊断只记录网关事件类型和准入失败的账号/聊天标识，不写消息正文；日志仍属私人运行数据。源码变更不等于部署。按平台逐项验证入站、附件、模型执行、typing 清理、进度顺序、最终发送、断网重连与重启恢复。
 
@@ -50,7 +50,7 @@ QQ 诊断只记录网关事件类型和准入失败的账号/聊天标识，不�
 
 The authoritative catalog contains `/help`, `/usage`, and locally installed command extensions. The same catalog drives text invocation, execution, help, and platform registration. Existing `bindings` remain message routes and are independent of command discovery.
 
-Command permission uses the same `allowUsers` identity admission on every adapter, with no extra owner role or channel allowlist. Registered commands bypass `dmOnly`, which only governs ordinary-message routing. Text commands keep the existing group mention rule; native slash interactions address the bot directly. Unknown slash text follows ordinary-message routing. `privateOnly` restricts where an extension result may be shown; built-in `/help` and `/usage` are available in groups. Recognized Discord controls do not enter the attention/model path.
+Command permission uses the same explicit `allowUsers` admission on every adapter, with no owner role or channel allowlist. Registered commands bypass `dmOnly` and the group-mention requirement; native slash interactions also address the bot directly. This preserves the old command UX for an admitted user while deliberately not restoring its private identity database and owner-presence check. A slash-like text is classified before catalog lookup: `/name@this_bot` is accepted as `name`, `/name@another_bot` is never executed locally, and `/session` remains silently ignored for compatibility. After admission, an unregistered slash command replies `Unknown command. Send /help to see available commands.` in a direct chat and stays silent in a group. `privateOnly` restricts where an extension result may be shown; built-in `/help` and `/usage` are available in groups. Recognized Discord controls do not enter the attention/model path.
 
 Command IDs are claimed durably before execution, so platform replay cannot invoke a handler twice. Interrupted commands are not automatically replayed. Discord private response handles exist only in memory: after restart or expiry, a reply fails closed instead of posting publicly.
 

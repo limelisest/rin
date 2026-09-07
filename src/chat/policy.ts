@@ -42,9 +42,11 @@ export function admitted(adapter: AdapterConfig, userId: unknown, kind: string, 
   return command || !(adapter.dmOnly ?? adapter.type === 'discord') || kind === 'dm';
 }
 
-export function allowed(adapter: AdapterConfig, message: ChatMessage, options = {}) {
-  if (!admitted(adapter, message.userId, message.kind, options)) return false;
-  if (message.kind === 'group' && adapter.requireMention !== false && !message.mentioned) return false;
+export function allowed(adapter: AdapterConfig, message: ChatMessage, {command = false}: {command?: boolean} = {}) {
+  if (!admitted(adapter, message.userId, message.kind, {command})) return false;
+  // Legacy commands were authenticated by sender identity and command registry.
+  // Mentioning only gates ordinary group conversation.
+  if (message.kind === 'group' && adapter.requireMention !== false && !message.mentioned && !command) return false;
   return Boolean(message.id && message.chatId && (message.text || message.files?.length));
 }
 

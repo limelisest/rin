@@ -4,12 +4,51 @@ import {mkdtempSync,rmSync,mkdirSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {ChatBridge} from '../dist/chat/bridge.js';
-import {COMMANDS,parseCommand} from '../dist/chat/commands.js';
+import {COMMANDS,parseCommand,parseCommandText} from '../dist/chat/commands.js';
 
 test('the built-in catalog is minimal and accepts a shared extension grammar',()=>{
   assert.deepEqual(COMMANDS.map(c=>c.name),['help','usage']);
-  assert.deepEqual(parseCommand('/usage@rin_bot history --days 7'),{name:'usage',args:'history --days 7'});
+  assert.deepEqual(parseCommand('/usage@rin_bot history --days 7',COMMANDS,'self'),{name:'usage',args:'history --days 7'});
   assert.deepEqual(parseCommand('/echo_2 yes',[{name:'echo_2'}]),{name:'echo_2',args:'yes'});
+  assert.deepEqual(parseCommandText('/unknown@other_bot words'),{commandLike:true,name:'unknown',target:'other_bot',args:'words',registered:false});
+  assert.equal(parseCommand('/usage@other_bot',COMMANDS,'other'),null);
+});
+
+test('command-like text never becomes a prompt, and only private unknown commands reply',async()=>{
+  const dataDir=mkdtempSync(join(tmpdir(),'rin-command-like-'));const sent=[],queued=[];let receive;
+  const config={dataDir,bindings:[],adapters:[{id:'d',type:'discord',dmOnly:false,allowUsers:['owner']}]};
+  const bridge=new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async(...args)=>{queued.push(args);return {messageId:'q'};}},
+    adapterFactory:async()=>({capabilities:{edit:false,typing:false,maxText:2000},start:async fn=>{receive=fn;},stop:async()=>{},send:async(_target,output)=>{sent.push(output);return{id:String(sent.length)};}}),log:{info(){},warn(){},error(){}}});
+  const message=(id,text,kind='dm',extra={})=>({id,text,chatId:kind==='dm'?'dm':'group',userId:'owner',kind,mentioned:true,...extra});
+  try{
+    await bridge.start();
+    await receive(message('private-unknown','/no_such_command'));
+    await receive(message('unidentified-target','/usage@other_bot'));
+    await receive(message('other-bot','/usage@other_bot','dm',{commandTarget:'other'}));
+    await receive(message('self-target','/usage@rin_bot','dm',{commandTarget:'self'}));
+    await receive(message('group-unknown','/no_such_command','group'));
+    await receive(message('removed','/session'));
+    await bridge.flush();
+    assert.deepEqual(sent.slice(0,3).map(output=>[output.text,output.replyTo]),[
+      ['Unknown command. Send /help to see available commands.','private-unknown'],
+      ['Unknown command. Send /help to see available commands.','unidentified-target'],
+      ['Unknown command. Send /help to see available commands.','other-bot'],
+    ]);
+    assert.equal(sent[3].replyTo,'self-target');assert.notEqual(sent[3].text,'Unknown command. Send /help to see available commands.');
+    assert.equal(queued.length,0);
+  }finally{await bridge.stop();rmSync(dataDir,{recursive:true,force:true});}
+});
+
+test('text command replies quote the source only once on every transport',async()=>{
+  for(const type of ['discord','telegram','qqbot','onebot','feishu']){
+    const dataDir=mkdtempSync(join(tmpdir(),`rin-command-quote-${type}-`));const sent=[];let receive;
+    const bridge=new ChatBridge({dataDir,bindings:[],adapters:[{id:'a',type,allowUsers:['owner']}]},{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{}},usage:async()=>({text:'x'.repeat(4000)}),
+      adapterFactory:async()=>({capabilities:{edit:false,typing:false,maxText:1900},start:async fn=>{receive=fn;},stop:async()=>{},send:async(_target,output)=>{sent.push(output);return{id:String(sent.length)};}}),log:{info(){},warn(){},error(){}}});
+    try{
+      await bridge.start();await receive({id:'source',chatId:'dm',userId:'owner',kind:'dm',text:'/usage'});await bridge.flush();
+      assert.equal(sent[0].replyTo,'source',type);assert.ok(sent.slice(1).every(output=>output.replyTo===undefined),type);
+    }finally{await bridge.stop();rmSync(dataDir,{recursive:true,force:true});}
+  }
 });
 
 test('every admitted caller can execute usage, extension privacy stays explicit, and replay is durable',async()=>{
@@ -29,7 +68,7 @@ test('every admitted caller can execute usage, extension privacy stays explicit,
     await receive(msg('b','/usage',{userId:'b'}));await bridge.flush();assert.equal(usageCalls,2);
     await receive(msg('ignored','/usage',{userId:'stranger'}));assert.equal(usageCalls,2);
     await Promise.all([receive(msg('u','/usage',{commandInteraction:{id:'interaction'}})),receive(msg('u','/usage'))]);await bridge.flush();
-    assert.equal(usageCalls,3);assert.equal(sent.at(-1).t.commandInteraction.id,'interaction');
+    assert.equal(usageCalls,3);assert.equal(sent.at(-1).t.commandInteraction.id,'interaction');assert.equal(sent.at(-1).o.replyTo,undefined);
     await receive(msg('eg','/echo hidden',{kind:'group',userId:'b'}));await bridge.flush();assert.match(sent.at(-1).o.text,/私聊/);
     await receive(msg('e','/echo literal',{userId:'b'}));await bridge.flush();assert.equal(sent.at(-1).o.text,'literal');assert.equal(sent.at(-1).t.chatId,'chat');
     await bridge.stop();await start();const count=sent.length;await receive(msg('e','/echo literal',{userId:'b'}));await receive(msg('u','/usage'));await bridge.flush();

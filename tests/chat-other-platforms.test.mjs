@@ -107,18 +107,24 @@ test('OneBot HTTP sends to the v11 action endpoint with bearer auth', async () =
   await adapter.stop();
 });
 
-test('OneBot admits only recognized group commands through dmOnly', async () => {
+test('OneBot admits registered bare and @ commands with the default mention gate', async () => {
   const ctx=await context();ctx.commands=[{name:'ping',description:'Check latency'}];
-  const adapter=createOneBot({id:'ob-command',wsUrl:'ws://onebot',allowUsers:['42'],dmOnly:true,requireMention:false,WebSocket:FakeWebSocket},ctx);
+  const adapter=createOneBot({id:'ob-command',wsUrl:'ws://onebot',allowUsers:['42'],dmOnly:true,WebSocket:FakeWebSocket},ctx);
   const incoming=[];
   await adapter.start(async event=>incoming.push(event));
   for(const event of [
     {user_id:42,message_id:1,message:'/ping'},
-    {user_id:7,message_id:2,message:'/ping'},
-    {user_id:42,message_id:3,message:'/help'},
+    {user_id:42,message_id:2,message:[{type:'at',data:{qq:99}},{type:'text',data:{text:' /ping'}}],self_id:99},
+    {user_id:42,message_id:3,message:'/ping@99',self_id:99},
+    {user_id:42,message_id:4,message:'ordinary chat'},
+    {user_id:42,message_id:5,message:'/unknown'},
+    {user_id:7,message_id:6,message:'/ping'},
+    {user_id:42,message_id:7,message:'/help'},
   ]) FakeWebSocket.instance.emit('message',JSON.stringify({post_type:'message',message_type:'group',group_id:8,...event}));
   await new Promise(setImmediate);
-  assert.deepEqual(incoming.map(event=>event.id),['1']);
+  assert.deepEqual(incoming.map(event=>event.id),['1','2','3']);
+  assert.equal(incoming[1].mentioned,true);
+  assert.equal(incoming[2].commandTarget,'self');
   await adapter.stop();
 });
 
@@ -138,7 +144,6 @@ test('Feishu long connection gates resources and uses official message endpoints
     message: {
       create: async (request) => { calls.push(['create', request]); return { data: { message_id: 'fs-1' } }; },
       reply: async (request) => { calls.push(['reply', request]); return { data: { message_id: 'fs-reply' } }; },
-      update: async (request) => { calls.push(['update', request]); return { data: { message_id: 'fs-edit' } }; },
       delete: async (request) => { calls.push(['delete', request]); },
     },
     image: { create: async () => ({ data: { image_key: 'img' } }) },
@@ -158,11 +163,10 @@ test('Feishu long connection gates resources and uses official message endpoints
   assert.deepEqual(await adapter.send({ chatId: 'c', kind: 'group' }, { text: 'thread reply', replyTo: 'parent' }), { id: 'fs-reply' });
   assert.equal(calls[1][0], 'reply');
   assert.equal(calls[1][1].path.message_id, 'parent');
-  assert.deepEqual(await adapter.send({ chatId: 'c', kind: 'group' }, { text: 'updated', editId: 'old' }), { id: 'fs-edit' });
-  assert.equal(calls[2][0], 'update');
-  await adapter.delete({ chatId: 'c', kind: 'dm' }, 'fs-edit');
-  assert.equal(calls[3][0], 'delete');
-  assert.equal(calls[3][1].path.message_id, 'fs-edit');
+  await assert.rejects(() => adapter.send({ chatId: 'c', kind: 'group' }, { text: 'updated', editId: 'old' }), /does not support editing/);
+  await adapter.delete({ chatId: 'c', kind: 'dm' }, 'fs-1');
+  assert.equal(calls[2][0], 'delete');
+  assert.equal(calls[2][1].path.message_id, 'fs-1');
   await assert.rejects(() => adapter.typing({ chatId: 'c', kind: 'dm' }), /does not support typing/);
   await adapter.stop();
 });
@@ -180,8 +184,26 @@ test('Feishu admits only recognized group commands through dmOnly', async () => 
     {userId:'stranger',id:'2',text:'/ping'},
     {userId:'owner',id:'3',text:'/help'},
   ]) await receive({sender:{sender_id:{open_id:event.userId}},message:{message_id:event.id,chat_id:'g',chat_type:'group',mentions:[{key:'@_user_1',id:{open_id:'bot'}}],content:JSON.stringify({text:`@_user_1 ${event.text}`})}});
-  assert.deepEqual(incoming.map(event=>event.id),['1']);
+  await receive({sender:{sender_id:{open_id:'owner'}},message:{message_id:'4',chat_id:'g',chat_type:'group',mentions:[],content:JSON.stringify({text:'/ping@bot'})}});
+  assert.deepEqual(incoming.map(event=>event.id),['1','4']);
   assert.equal(incoming[0].text,'/ping');
+  assert.equal(incoming[1].commandTarget,'self');
+  await adapter.stop();
+});
+
+test('Feishu preserves slash-prefixed unknown and other-target commands for the bridge', async () => {
+  const client={im:{}};
+  const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
+  const ctx=await context();ctx.commands=[{name:'ping',description:'Check latency'}];
+  const adapter=createFeishu({id:'fs-command-like',appId:'a',appSecret:'s',allowUsers:['owner'],botOpenId:'bot',sdk,client},ctx);
+  const incoming=[];
+  await adapter.start(async event=>incoming.push(event));
+  const receive=FakeDispatcher.instance.map['im.message.receive_v1'];
+  for(const [id,text] of [['unknown','/unknown'],['other','/ping@other']]) {
+    await receive({sender:{sender_id:{open_id:'owner'}},message:{message_id:id,chat_id:'g',chat_type:'group',mentions:[{key:'@_user_1',id:{open_id:'bot'}}],content:JSON.stringify({text:`@_user_1 ${text}`})}});
+  }
+  assert.deepEqual(incoming.map(event=>event.text),['/unknown','/ping@other']);
+  assert.equal(incoming[1].commandTarget,'other');
   await adapter.stop();
 });
 
@@ -290,12 +312,11 @@ test('OneBot media uses portable base64 with image/record/video and standalone f
   }finally{await adapter.stop();}
 });
 
-test('Feishu preserves Markdown post styles on send/edit and media-only quote',async()=>{
+test('Feishu preserves Markdown post styles and media-only quote while refusing edits',async()=>{
   const calls=[];const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
   const client={im:{message:{
     create:async request=>{calls.push(['create',request]);return {data:{message_id:'new'}}},
     reply:async request=>{calls.push(['reply',request]);return {data:{message_id:'quoted'}}},
-    update:async request=>{calls.push(['update',request]);return {data:{message_id:'old'}}},
   },image:{create:async({data})=>{data.image.destroy();return {data:{image_key:'image'}}}},file:{create:async()=>({data:{file_key:'file'}})}}};
   const ctx=await context();const {writeFile}=await import('node:fs/promises');const local=path.join(ctx.dataDir,'image.png');await writeFile(local,'image');
   const adapter=createFeishu({id:'fs',appId:'a',appSecret:'s',allowUsers:['owner'],sdk,client},ctx);await adapter.start(async()=>{});
@@ -303,33 +324,8 @@ test('Feishu preserves Markdown post styles on send/edit and media-only quote',a
     await adapter.send({chatId:'c',kind:'dm'},{text:'**Bold** and [link](https://example.com)',replyTo:'source'});
     const request=calls[0][1];assert.equal(request.data.msg_type,'post');assert.equal(request.path.message_id,'source');
     assert.deepEqual(JSON.parse(request.data.content).zh_cn.content[0],[{tag:'text',text:'Bold',style:['bold']},{tag:'text',text:' and '},{tag:'a',text:'link',href:'https://example.com'}]);
-    await adapter.send({chatId:'c',kind:'dm'},{text:'... Working...\n\n────────\n\n```js\nconst x=1\n```',editId:'old'});
-    assert.equal(calls[1][0],'update');assert.equal(calls[1][1].data.msg_type,'post');
-    assert.ok(JSON.parse(calls[1][1].data.content).zh_cn.content.flat().some(element=>element.tag==='code_block' && element.language==='js'));
+    await assert.rejects(() => adapter.send({chatId:'c',kind:'dm'},{text:'... Working...',editId:'old'}),/does not support editing/);
     await adapter.send({chatId:'c',kind:'dm'},{files:[{path:local,mimeType:'image/png'}],replyTo:'source'});
-    assert.equal(calls[2][0],'reply');assert.equal(calls[2][1].path.message_id,'source');assert.equal(calls[2][1].data.msg_type,'image');
-  }finally{await adapter.stop();}
-});
-
-test('Feishu replaces only explicit API missing/uneditable responses, keeps quote and marks uncertain replacement',async()=>{
-  const sdk={Client:class{},EventDispatcher:FakeDispatcher,WSClient:FakeWSClient,AppType:{},Domain:{},LoggerLevel:{}};
-  let failure={code:230011,msg:'The message is recalled.'}, replacementFailure, sends=0;
-  const client={im:{message:{
-    update:async()=>{if(failure instanceof Error)throw failure;return failure;},
-    reply:async request=>{sends++;assert.equal(request.path.message_id,'source');assert.equal(request.data.msg_type,'post');if(replacementFailure)throw replacementFailure;return {code:0,data:{message_id:'replacement'}};},
-    delete:async()=>({code:230011,msg:'The message is recalled.'}),
-  }}};
-  const adapter=createFeishu({id:'fs',appId:'a',appSecret:'s',allowUsers:['owner'],sdk,client},await context());await adapter.start(async()=>{});
-  const send=()=>adapter.send({chatId:'c',kind:'dm'},{text:'progress',editId:'old',replyTo:'source'});
-  try{
-    assert.deepEqual(await send(),{id:'replacement'});assert.equal(sends,1);
-    failure=Object.assign(new Error('request failed'),{response:{data:{code:231003,msg:'message not found'}}});
-    assert.deepEqual(await send(),{id:'replacement'});assert.equal(sends,2);
-    for(const unknown of [new Error('message not found'),{code:230002,msg:'The bot can not be outside the group.'},{code:230020,msg:'Permission denied'},{code:230001,msg:'Invalid content'}]){
-      failure=unknown;await assert.rejects(send);assert.equal(sends,2,'network, permissions and formatting failures cannot create replacement messages');
-    }
-    failure={code:230011,msg:'The message is recalled.'};replacementFailure=new Error('socket timeout');
-    await assert.rejects(send,error=>error.deliveryUncertain===true);assert.equal(sends,3);
-    await adapter.delete({chatId:'c'},'already-gone');
+    assert.equal(calls[1][0],'reply');assert.equal(calls[1][1].path.message_id,'source');assert.equal(calls[1][1].data.msg_type,'image');
   }finally{await adapter.stop();}
 });

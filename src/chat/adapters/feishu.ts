@@ -19,14 +19,17 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { admitted } from '../policy.js';
-import { COMMANDS, parseCommand } from '../commands.js';
+import { COMMANDS, parseCommand, parseCommandText } from '../commands.js';
 
-const capabilities = Object.freeze({ edit: true, delete: true, typing: false, maxText: 30000 });
+// Feishu posts are sent as immutable snapshots.  The API has update endpoints,
+// but using them for live progress makes a private chat behave unlike the other
+// non-editing transports and can leave a conversation full of rewritten posts.
+const capabilities = Object.freeze({ edit: false, typing: false, maxText: 30000 });
 
 function unwrap(response: FeishuResult | null): FeishuResult { return response?.data?.data || response?.data || response || {}; }
 
-// Use the SDK response envelope, not a generic network Error.message.
-// Legacy EditableTextMessageGroup recovers missing/uneditable messages; broad
+// Use the SDK response envelope, not a generic network Error.message.  A
+// missing message is harmless only while deleting a retired remote post; broad
 // SDK target_revoked classifications also include chat/permission failures.
 function apiFailure(input: unknown) {
   const value = platformError(input);
@@ -40,7 +43,7 @@ function checked<T>(result: T): T {
   if(failure)throw Object.assign(new Error(`Feishu API ${failure.code}: ${failure.message}`),{code:failure.code,msg:failure.message,fallbackSafe:true});
   return result;
 }
-function missingEditableMessage(error: unknown) {
+function missingRemoteMessage(error: unknown) {
   const failure=apiFailure(error);
   return Boolean(failure && /^(?:the )?message (?:is |was |has been )?(?:recalled|withdrawn|deleted|not found|does not exist|cannot be edited|can't be edited)[.!]?$/i.test(failure.message.trim()));
 }
@@ -109,14 +112,21 @@ export function createAdapter(config: FeishuConfig, context: AdapterContext) {
             const key = String(mention.key || '');
             return key ? value.split(key).join('') : value;
           }, text).trim();
-          const command = Boolean(parseCommand(commandText,commands));
+          const parsed = parseCommandText(commandText,commands);
+          const botOpenId = String(config.botOpenId || '').toLowerCase();
+          const commandTarget = parsed?.target ? (botOpenId && parsed.target === botOpenId ? 'self' : 'other') : undefined;
+          const command = Boolean(parseCommand(commandText,commands,commandTarget));
           // Admission deliberately precedes authenticated resource downloads.
           if (!admitted({...config,type:'feishu'},userId,kind,{command})) return;
-          if (kind === 'group' && config.requireMention !== false && !mentioned) return;
+          if (kind === 'group' && config.requireMention !== false && !mentioned && !command) return;
           const envelope: ChatMessage = {
             id: String(message.message_id), chatId: String(message.chat_id), userId, kind,
             mentioned,
-            text: command ? commandText : text, files: [],
+            // Keep command-like text after removing our mention even when it is
+            // unknown or addressed elsewhere, so the bridge can reject it
+            // instead of treating the original mention markup as a prompt.
+            text: parsed ? commandText : text, files: [],
+            ...(commandTarget ? { commandTarget } : {}),
             ...(message.parent_id ? { replyTo: String(message.parent_id) } : {}),
           };
           if (context.isBound && !await context.isBound(envelope)) return;
@@ -134,22 +144,9 @@ export function createAdapter(config: FeishuConfig, context: AdapterContext) {
       if (!client) throw new Error('Feishu adapter is not started');
       const receiveIdType = 'chat_id';
       const receiveId = target.chatId;
+      if (output.editId) throw new Error('Feishu adapter does not support editing sent messages');
       let result: FeishuResult | undefined;
-      if (output.editId) {
-        if (output.files?.length) throw new Error('Feishu edit cannot replace a message with local files');
-        try {
-          result = checked(await client.im.message.update({ path: { message_id: String(output.editId) }, data: postData(String(output.text || '')) }));
-        } catch (errorValue) { const error = platformError(errorValue);
-          if(!missingEditableMessage(error))throw error;
-          try {
-            const replacement={...output};delete replacement.editId;
-            return await this.send(target,replacement);
-          } catch (replacementErrorValue) { const replacementError = platformError(replacementErrorValue);
-            // The replacement may have reached Feishu before its reply was lost.
-            replacementError.deliveryUncertain=true;throw replacementError;
-          }
-        }
-      } else if (output.replyTo && output.text) {
+      if (output.replyTo && output.text) {
         result = await client.im.message.reply({ path: { message_id: String(output.replyTo) }, data: postData(String(output.text)) });
       } else if (output.text) {
         result = await client.im.message.create({ params: { receive_id_type: receiveIdType }, data: { receive_id: String(receiveId), ...postData(String(output.text)) } });
@@ -178,7 +175,7 @@ export function createAdapter(config: FeishuConfig, context: AdapterContext) {
       if (!client) throw new Error('Feishu adapter is not started');
       if (id == null || id === '') throw new Error('Feishu delete requires a message id');
       try { checked(await client.im.message.delete({ path: { message_id: String(id) } })); }
-      catch (errorValue) { const error = platformError(errorValue);if(!missingEditableMessage(error))throw error;}
+      catch (errorValue) { const error = platformError(errorValue);if(!missingRemoteMessage(error))throw error;}
     },
     async typing() { throw new Error('Feishu bot API does not support typing indicators'); },
   };

@@ -34,6 +34,12 @@ test('Discord group text commands retain addressing and recognize extension regi
   const message={id:'text',guildId:'guild',channelId:'any-channel',author:{id:'allowed'},content:'<@bot> /ping',mentions:{users:{has:()=>true}}};
   const commands=[{name:'ping',description:'Extension'}];
   assert.equal(normalizeDiscordMessage(message,config,'bot',commands)?.text,'/ping');
+  assert.equal(normalizeDiscordMessage({...message,content:'/ping',mentions:{users:{has:()=>false}}},config,'bot',commands)?.text,'/ping');
+  const selfTarget=normalizeDiscordMessage({...message,content:'/ping@RinBot',mentions:{users:{has:()=>false}}},config,{id:'bot',username:'RinBot'},commands);
+  assert.equal(selfTarget?.commandTarget,'self');
+  const otherTarget=normalizeDiscordMessage({...message,guildId:undefined,content:'/ping@OtherBot'},config,{id:'bot',username:'RinBot'},commands);
+  assert.equal(otherTarget?.commandTarget,'other');
+  assert.equal(normalizeDiscordMessage({...message,content:'ordinary chat',mentions:{users:{has:()=>false}}},config,'bot',commands),null);
   assert.equal(normalizeDiscordMessage({...message,content:'<@bot> /unknown'},config,'bot',commands),null);
   assert.equal(normalizeDiscordMessage({...message,mentions:{users:{has:()=>false}}},config,'bot',commands),null);
   assert.equal(normalizeDiscordMessage({...message,author:{id:'stranger'}},config,'bot',commands),null);

@@ -1,4 +1,4 @@
-import type {Client, Message, Interaction, ChatInputCommandInteraction, MessageCreateOptions, ApplicationCommandDataResolvable, GuildBasedChannel, TextBasedChannel} from 'discord.js';
+import type {Client, Message, Interaction, ChatInputCommandInteraction, MessageCreateOptions, ApplicationCommandDataResolvable, GuildBasedChannel, TextBasedChannel, User} from 'discord.js';
 interface DiscordConfig extends AdapterConfig { __client?: Client; __fetch?: typeof fetch; commandGuildIds?: string[]; }
 import type { AdapterConfig, AdapterContext, ChatAdapter, ChatMessage, ChatTarget, ChatOutput, ChatCommand, CommandDescriptor, FileAttachment } from '../types.js';
 import { platformError } from './types.js';
@@ -6,7 +6,7 @@ import {admitted} from '../policy.js';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {COMMANDS, parseCommand, registerCommands} from '../commands.js';
+import {COMMANDS, parseCommand, parseCommandText, registerCommands} from '../commands.js';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -68,17 +68,30 @@ async function download(url: string, name: string | null, mimeType: string | nul
   return {path: filePath, name: safe, mimeType: mimeType || undefined};
 }
 
-export function normalizeDiscordMessage(message: Message, config: DiscordConfig, selfId = '', commands = COMMANDS): ChatMessage | null {
+type DiscordSelf = string | Pick<User, 'id' | 'username'>;
+
+function discordSelf(value: DiscordSelf = '') {
+  if (typeof value === 'string') return {id: value, username: ''};
+  return {id: String(value?.id || ''), username: String(value?.username || '').toLowerCase()};
+}
+
+export function normalizeDiscordMessage(message: Message, config: DiscordConfig, self: DiscordSelf = '', commands = COMMANDS): ChatMessage | null {
+  const {id: selfId, username: selfUsername} = discordSelf(self);
   if (!message || message.author?.bot || String(message.author?.id || '') === String(selfId)) return null;
   const userId = String(message.author?.id || '');
   const kind = message.guildId ? 'group' : 'dm';
   const mentionTokens = selfId ? [`<@${selfId}>`, `<@!${selfId}>`] : [];
   const mentioned = kind === 'dm' || Boolean(message.mentions?.users?.has?.(String(selfId)));
-  if (kind === 'group' && (config.requireMention ?? true) && !mentioned) return null;
   let text = String(message.content || '').trim();
   if (mentioned && kind === 'group') for (const token of mentionTokens) text = text.split(token).join('').trim();
-  if (!userId || !admitted({...config,type:'discord'},userId,kind,{command:Boolean(parseCommand(text,commands))}))return null;
+  const parsed = parseCommandText(text,commands);
+  const commandTarget = parsed?.target
+    ? (parsed.target === String(selfId).toLowerCase() || parsed.target === selfUsername ? 'self' : 'other') : undefined;
+  const command = Boolean(parseCommand(text,commands,commandTarget));
+  if (!userId || !admitted({...config,type:'discord'},userId,kind,{command})) return null;
+  if (kind === 'group' && (config.requireMention ?? true) && !mentioned && !command) return null;
   return {id: String(message.id), chatId: String(message.channelId), userId, kind, mentioned, text,
+    ...(commandTarget ? {commandTarget} : {}),
     ...((message.channel && 'name' in message.channel ? message.channel.name : undefined) ? {chatName:String(message.channel && 'name' in message.channel ? message.channel.name : '').slice(0,100)} : {}),
     replyTo: message.reference?.messageId ? String(message.reference.messageId) : undefined};
 }
@@ -94,7 +107,7 @@ export function createAdapter(config: DiscordConfig, context: AdapterContext) {
   const capabilities = {edit: true, typing: true, maxText: 2000};
 
   async function receive(message: Message) {
-    const incoming = normalizeDiscordMessage(message, config, client?.user?.id, commands);
+    const incoming = normalizeDiscordMessage(message, config, client?.user || '', commands);
     const bound = incoming && (!context.isBound || await context.isBound(incoming));
     let commandSource=String(message?.content || '').trim();
     for(const token of client?.user?.id ? [`<@${client.user.id}>`,`<@!${client.user.id}>`] : [])commandSource=commandSource.split(token).join('').trim();

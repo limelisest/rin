@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatBridge } from '../dist/chat/bridge.js';
 import { outputFiles } from '../dist/chat/files.js';
+import { createAdapter as createFeishu } from '../dist/chat/adapters/feishu.js';
 
 test('usage cards stay image-only on every chat transport while retaining a delivery fallback',async()=>{
   for(const type of ['discord','telegram','qqbot','onebot','feishu']){
@@ -35,7 +36,7 @@ test('usage card media failures fall back to complete text on every normal chat 
     try{
       await bridge.start();await receive({id:'usage',chatId:'dm',userId:'owner',kind:'dm',text:'/usage',files:[]});await bridge.flush();
       assert.equal(sent.length,2,`${type} must make one text fallback after media failure`);
-      assert.ok(sent[0].files?.length);assert.deepEqual(sent[1],{text:'完整额度文字'});
+      assert.ok(sent[0].files?.length);assert.deepEqual(sent[1],{text:'完整额度文字',replyTo:'usage'});
       assert.equal(bridge.store.outgoing().length,0);
     }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
   }
@@ -186,7 +187,7 @@ test('restart preserves buffered public text until completion on a no-edit trans
 });
 
 
-for(const type of ['discord','telegram','feishu']) test(`${type}: different public items update one progress message, survive restart, and retire before a fresh final`,async()=>{
+for(const type of ['discord','telegram']) test(`${type}: different public items update one progress message, survive restart, and retire before a fresh final`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),`rin-${type}-progress-`));
   const calls=[],remote=new Map();let nextId=1,bridge;
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
@@ -250,7 +251,7 @@ test('artifact links respect real paths and roots',()=>{
   assert.deepEqual(outputFiles(text,[dir]).map(f=>f.name),['ok.txt']);rmSync(dir,{recursive:true});rmSync(other,{recursive:true});
 });
 
-for(const type of ['discord','telegram','feishu']) test(`${type}: native start immediately presents Working; errors preserve quoted progress; only final withdraws it`,async()=>{
+for(const type of ['discord','telegram']) test(`${type}: native start immediately presents Working; errors preserve quoted progress; only final withdraws it`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),`rin-${type}-lifecycle-`));
   const calls=[],remote=new Map();let nextId=1,receive;
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
@@ -287,7 +288,7 @@ for(const type of ['discord','telegram','feishu']) test(`${type}: native start i
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
 
-for(const type of ['discord','telegram','feishu']) test(`${type}: a new turn after an error reuses the quoted progress and preserves its content until replaced`,async()=>{
+for(const type of ['discord','telegram']) test(`${type}: a new turn after an error reuses the quoted progress and preserves its content until replaced`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),`rin-${type}-retry-slot-`));
   const calls=[],remote=new Map();let nextId=1;
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
@@ -356,7 +357,7 @@ test('Discord keeps separate quote slots and a final deletes only its frozen sou
   }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
 
-for(const type of ['qqbot','onebot']) test(`${type}: complete public snapshots arrive immediately with prefix, immutable deduplication, native file order and frozen quote`,async()=>{
+for(const type of ['qqbot','onebot','feishu']) test(`${type}: complete public snapshots arrive immediately with prefix, immutable deduplication, native file order and frozen quote`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),`rin-${type}-snapshots-`));
   const file=join(dataDir,'image.png');writeFileSync(file,'image');
   const calls=[];let bridge;
@@ -372,17 +373,50 @@ for(const type of ['qqbot','onebot']) test(`${type}: complete public snapshots a
     await emit({type:'started'});assert.equal(calls.length,1);assert.equal(calls.shift().text,'Working...');
     await emit({type:'started'});assert.equal(calls.length,0,'marker is not repeated');
     const comment={type:'text',itemId:'comment',phase:'commentary',text:'**Checking** ~~old~~ files'};
-    await emit(comment);assert.equal(calls.length,1);assert.equal(calls[0].text,'... Checking old files');assert.equal(calls[0].replyTo,'source');
+    await emit(comment);assert.equal(calls.length,1);assert.equal(calls[0].text,type==='feishu'?'... **Checking** ~~old~~ files':'... Checking old files');assert.equal(calls[0].replyTo,'source');
     await emit(comment);assert.equal(calls.length,1);
     await emit({...comment,text:'Checked files'});assert.equal(calls.length,2);assert.equal(calls[1].text,'... Checked files');
     await emit({type:'text',itemId:'summary',phase:'summary',text:'**stale**\n\n**Latest summary**'});assert.equal(calls.at(-1).text,'... Latest summary');
     await bridge.stop();bridge=make();await bridge.start();await emit(comment);assert.equal(calls.length,3,'restart/replayed older snapshot does not resend');
     bridge.store.setCursor(`reply:${bridge.routeKey(config.bindings[0])}`,{messageId:'later-input'});
     await emit({type:'text',itemId:'final',phase:'final',text:`**Before**\n\n![image](${file})\n\nAfter`});
-    assert.deepEqual(calls.slice(-3).map(o=>o.files?'file':o.text),['Before','file','After']);
+    assert.deepEqual(calls.slice(-3).map(o=>o.files?'file':o.text),type==='feishu'?['**Before**\n\n','file','\n\nAfter']:['Before','file','After']);
     assert.equal(calls.at(-3).replyTo,'source');assert.equal(calls.at(-2).replyTo,undefined);assert.equal(calls.at(-2).files[0].mimeType,'image/png');
     const count=calls.length;await emit({type:'completed'});assert.equal(calls.length,count);
   }finally{if(bridge)await bridge.stop();rmSync(dataDir,{recursive:true});}
+});
+
+test('Feishu buffers same-turn deltas and sends one completed snapshot with ordered post attachments',async()=>{
+  const dataDir=mkdtempSync(join(tmpdir(),'rin-feishu-snapshot-events-'));
+  const image=join(dataDir,'image.png');writeFileSync(image,'image');
+  const outbound=[];let updates=0,adapter;
+  class Dispatcher { register(map){this.map=map;return this;} }
+  class WSClient { async start(){} async close(){} }
+  const sdk={Client:class{},EventDispatcher:Dispatcher,WSClient,AppType:{},Domain:{},LoggerLevel:{}};
+  const client={im:{message:{
+    create:async request=>{outbound.push(request);return {data:{message_id:`remote-${outbound.length}`}};},
+    update:async()=>{updates++;throw new Error('Feishu update must not be called for a snapshot');},
+  },image:{create:async({data})=>{for await(const _ of data.image){}return {data:{image_key:'image'}};}},file:{create:async({data})=>{for await(const _ of data.file){}return {data:{file_key:'file'}};}}}};
+  const config={dataDir,attachmentRoots:[dataDir],adapters:[{id:'feishu',type:'feishu',appId:'app',appSecret:'secret',allowUsers:['owner']}],bindings:[{adapter:'feishu',chatId:'dm',kind:'dm',threadId:'thread',mirror:true}]};
+  const bridge=new ChatBridge(config,{codex:{start:async()=>{},stop:async()=>{},watch:async()=>{},queue:async()=>({})},adapterFactory:async(adapterConfig,context)=>{
+    adapter=createFeishu({...adapterConfig,sdk,client},context);return adapter;
+  },log:{info(){},warn(){},error(){}}});
+  try{
+    await bridge.start();
+    assert.equal(adapter.capabilities.edit,false);
+    assert.equal(adapter.capabilities.typing,false);
+    bridge.event({threadId:'thread',turnId:'turn',type:'text',itemId:'answer',phase:'final_answer',delta:'**Before**\n\n'});await bridge.flush();
+    bridge.event({threadId:'thread',turnId:'turn',type:'text',itemId:'answer',phase:'final_answer',delta:`![image](${image})\n\nAfter`});await bridge.flush();
+    assert.deepEqual(outbound,[],'same-turn deltas are buffered instead of repeatedly posting');
+    bridge.event({threadId:'thread',turnId:'turn',type:'completed'});await bridge.flush();
+    assert.equal(updates,0);
+    assert.deepEqual(outbound.map(request=>request.data.msg_type),['post','image','post']);
+    assert.equal(outbound[0].data.receive_id,'dm');
+    assert.equal(outbound[1].data.receive_id,'dm');
+    assert.equal(outbound[2].data.receive_id,'dm');
+    assert.ok(JSON.parse(outbound[0].data.content).zh_cn.content.flat().some(element=>element.tag==='text' && element.text==='Before'));
+    assert.ok(JSON.parse(outbound[2].data.content).zh_cn.content.flat().some(element=>element.tag==='text' && element.text==='After'));
+  }finally{await bridge.stop();rmSync(dataDir,{recursive:true});}
 });
 
 test('QQ freezes passive reply context for every queued text/media part across later inputs and restart',async()=>{
@@ -438,7 +472,7 @@ test('Working fallback is plain, quoted, durable and absent with edit or reactio
 
 for(const type of ['discord','telegram','feishu','qqbot','onebot'])test(`${type}: questions stay independent while commentary continues, including after restart`,async()=>{
   const dataDir=mkdtempSync(join(tmpdir(),'rin-question-'));
-  const editable=['discord','telegram','feishu'].includes(type),remote=new Map(),calls=[];
+  const editable=['discord','telegram'].includes(type),remote=new Map(),calls=[];
   let nextId=0,b;
   const config={dataDir,adapters:[{id:'chat',type,allowUsers:['owner']}],bindings:[{adapter:'chat',chatId:'dm',kind:'dm',threadId:'t',mirror:true}]};
   const make=()=>new ChatBridge(config,{

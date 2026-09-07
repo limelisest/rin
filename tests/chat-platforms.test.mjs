@@ -26,7 +26,7 @@ test('Discord applies admission before downloading attachments', async () => {
   await adapter.stop();
 });
 
-test('Discord recognized controls never enter attention when group or user admission rejects them', async()=>{
+test('Discord admits an allowlisted bare group command without entering attention', async()=>{
   const client=new EventEmitter();client.user={id:'bot'};client.login=async()=>{};client.isReady=()=>true;client.destroy=async()=>{};
   let observed=0,handled=0;
   const adapter=discordAdapter({token:'x',allowUsers:['owner'],dmOnly:true,__client:client},{dataDir:'/tmp',log:{},observeDiscord:async()=>{observed++;}});
@@ -34,7 +34,7 @@ test('Discord recognized controls never enter attention when group or user admis
   client.emit('messageCreate',{id:'1',channelId:'g',guildId:'guild',content:'/usage',author:{id:'owner'},attachments:new Map()});
   client.emit('messageCreate',{id:'2',channelId:'dm',content:'/usage',author:{id:'stranger'},attachments:new Map()});
   await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(observed,0);assert.equal(handled,0);
+  assert.equal(observed,0);assert.equal(handled,1);
   await adapter.stop();
 });
 
@@ -168,18 +168,22 @@ test('Telegram normalization selects the largest photo and gates before file par
   assert.equal(normalizeTelegramUpdate({edited_message: {message_id: 2, chat: {id: 3, type: 'private'}, from: {id: 1}}}, {allowUsers: ['1']}), null);
 });
 
-test('Telegram normalizes commands addressed to this bot and rejects commands for another bot', () => {
+test('Telegram normalizes commands addressed to this bot and preserves another bot target for admission', () => {
   const config={allowUsers:['1'],dmOnly:false};
   const message={message_id:2,chat:{id:-3,type:'group'},from:{id:1}};
   assert.equal(normalizeTelegramUpdate({message:{...message,text:'/usage@RinBot current'}},config,{id:'9',username:'rinbot'}).text,'/usage current');
-  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help@OtherBot'}},config,{id:'9',username:'rinbot'}),null);
-  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help'}},config,{id:'9',username:'rinbot'}),null);
+  const other=normalizeTelegramUpdate({message:{...message,text:'/help@OtherBot'}},config,{id:'9',username:'rinbot'});
+  assert.equal(other, null);
+  const privateOther=normalizeTelegramUpdate({message:{...message,chat:{id:1,type:'private'},text:'/help@OtherBot'}},config,{id:'9',username:'rinbot'});
+  assert.equal(privateOther?.commandTarget,'other');
+  assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help'}},config,{id:'9',username:'rinbot'}).text,'/help');
   assert.equal(normalizeTelegramUpdate({message:{...message,text:'/help'}},{...config,requireMention:false},{id:'9',username:'rinbot'}).mentioned,false);
 });
 
 test('Telegram admits recognized group commands for allowed users under dmOnly', () => {
   const config={allowUsers:['1'],dmOnly:true};
   const base={message_id:2,chat:{id:-3,type:'group'},from:{id:1}};
+  assert.equal(normalizeTelegramUpdate({message:{...base,text:'/help'}},config,{id:'9',username:'rinbot'}).text,'/help');
   assert.equal(normalizeTelegramUpdate({message:{...base,text:'/help@RinBot'}},config,{id:'9',username:'rinbot'}).text,'/help');
   assert.equal(normalizeTelegramUpdate({message:{...base,text:'@RinBot /help',entities:[{type:'mention',offset:0,length:7}]}},config,{id:'9',username:'rinbot'}).text,'/help');
   assert.equal(normalizeTelegramUpdate({message:{...base,text:'/help @RinBot',entities:[{type:'mention',offset:6,length:7}]}},config,{id:'9',username:'rinbot'}).text,'/help');

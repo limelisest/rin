@@ -9,26 +9,27 @@ import {runUpdateMigrations,migrationHome} from '../dist/install/migrations.js';
 import {pathToFileURL} from 'node:url';
 import {main} from '../dist/cli.js';
 
-test('ordinary update runs managed migrations without applying the recommended profile',async t=>{
+test('ordinary update migrates both older managed guidance generations without applying the recommended profile',async t=>{
   const codexHome=await mkdtemp(join(tmpdir(),'rin-update-migrations-'));
   t.after(()=>rm(codexHome,{recursive:true,force:true}));
-  await writeFile(join(codexHome,'AGENTS.md'),`Personal preface.\n\n${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n`);
+  await writeFile(join(codexHome,'AGENTS.md'),`Personal preface.\n\n${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[1]}\n`);
   await writeFile(join(codexHome,'config.toml'),'model_auto_compact_token_limit = 120000\n');
   let request;
   const result=await runUpdateMigrations({home:null,codexHome,writeConfig:async value=>{request=value;return{ok:true};}});
   assert.deepEqual(result,{agentsChanged:true,obsoleteConfigRemoved:true,contextManagementMigrated:false});
-  assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),`Personal preface.\n\n${RIN_SUBAGENT_INSTRUCTIONS}\n`);
+  assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),`Personal preface.\n\n${RIN_SUBAGENT_INSTRUCTIONS}\n\n`);
   assert.deepEqual(request.edits,[{keyPath:'model_auto_compact_token_limit',value:null,mergeStrategy:'upsert'}]);
 });
 
-test('rin update runs migrations even when the release is already current',async t=>{
+test('rin update runs migrations for either legacy guidance generation when the release is already current',async t=>{
+  for (const legacy of RIN_LEGACY_SUBAGENT_INSTRUCTIONS) {
   const root=await mkdtemp(join(tmpdir(),'rin-update-current-'));
   // Git may finish detached maintenance after update returns. Retry transient
   // ENOTEMPTY during fixture removal without weakening the migration checks.
   t.after(()=>rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100}));
   const home=join(root,'install'),codexHome=join(root,'codex');
   await mkdir(codexHome,{recursive:true});
-  await writeFile(join(codexHome,'AGENTS.md'),`${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n`);
+  await writeFile(join(codexHome,'AGENTS.md'),`${legacy}\n`);
   await writeFile(join(codexHome,'config.toml'),'model_auto_compact_token_limit = 120000\n');
   const repository=process.cwd();
   const current=execFileSync('git',['rev-parse','main'],{cwd:repository,encoding:'utf8'}).trim();
@@ -49,6 +50,7 @@ test('rin update runs migrations even when the release is already current',async
   assert.deepEqual(output,['Rin is already up to date.']);
   assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),`${RIN_SUBAGENT_INSTRUCTIONS}\n`);
   assert.deepEqual(request.edits,[{keyPath:'model_auto_compact_token_limit',value:null,mergeStrategy:'upsert'}]);
+  }
 });
 
 test('candidate migration discovers custom install homes for older updaters',()=>{

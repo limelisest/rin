@@ -39,6 +39,18 @@ test('macOS loaded job uses kickstart and stop waits for bootout completion',asy
   let stopped=false;const stopping=service.stop().then(()=>stopped=true);await new Promise(resolve=>setImmediate(resolve));assert.equal(stopped,false);releaseBootout();await stopping;assert.equal(stopped,true);
 });
 
+test('macOS startup failure reports the launchctl exit detail',async t=>{
+  let present=false;
+  const run=async(_command,args)=>{
+    if(args[0]==='print')return present?{code:0,stdout:'state = exited\nlast exit code = 78\n'}:{code:113,stderr:'Could not find service'};
+    if(args[0]==='bootstrap')present=true;
+    return {code:0};
+  };
+  const {home,userHome}=await fixture(t,'darwin',run);
+  const detailed=createService({home,userHome,platform:'darwin',env:{UID:'501'},run,isReady:async()=>true,timeoutMs:20,pollMs:1});
+  await assert.rejects(detailed.start(),/launchctl print gui\/501\/com\.rin\.service exited with 0:\nstate = exited\nlast exit code = 78/);
+});
+
 test('Linux unit escapes manager syntax and lifecycle persists enable state',async t=>{
   let running=false;const calls=[];
   const run=async(command,args,config)=>{calls.push({command,args,config});if(args.includes('enable')&&args.includes('--now'))running=true;if(args.includes('disable')&&args.includes('--now'))running=false;if(args.includes('is-active'))return {code:running?0:3,stdout:running?'active':'inactive'};return {code:0};};

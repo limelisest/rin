@@ -128,6 +128,26 @@ test('failed service start restores the previous atomic record and restarts it',
   assert.deepEqual(calls, ['status', 'stop', 'start', 'stop', 'start']);
 });
 
+test('failed rollback keeps both service errors visible to the CLI', async t => {
+  const home = await temporary(t);
+  const oldSha = '1'.repeat(40), nextSha = '2'.repeat(40);
+  const state = { schema: 1, type: 'git', repository: '/origin', current: oldSha, previous: null, node: '/old/node' };
+  await writeFile(join(home, 'install.json'), JSON.stringify(state));
+  let starts = 0;
+  const service = {
+    async isRunning() { return true; },
+    async stop() {},
+    async start() { throw new Error(++starts === 1 ? 'launchctl new-release stderr' : 'launchctl rollback stderr'); },
+  };
+
+  await assert.rejects(
+    switchRelease(home, { sha: nextSha }, state, service),
+    error => error instanceof AggregateError &&
+      /New release service error: launchctl new-release stderr/.test(error.message) &&
+      /Previous release service recovery error: launchctl rollback stderr/.test(error.message),
+  );
+});
+
 test('install lock rejects contention and is released after the owner finishes', async t => {
   const home = await temporary(t);
   let release;

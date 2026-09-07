@@ -178,6 +178,14 @@ test('update migrates only exact Rin-managed subagent guidance and avoids duplic
   assert.ok(migrated.startsWith(persona));
   assert.equal(migrated.includes(RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]), false);
   assert.equal(migrated.split(RIN_SUBAGENT_INSTRUCTIONS).length - 1, 1);
+
+  const bothLegacyFile = join(await temporary(t), 'AGENTS.md');
+  await writeFile(bothLegacyFile, `${persona}${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[1]}\n`);
+  assert.equal(await migrateAgentsInstructions(bothLegacyFile), true);
+  const bothMigrated = await readFile(bothLegacyFile, 'utf8');
+  assert.ok(bothMigrated.startsWith(persona));
+  for (const legacy of RIN_LEGACY_SUBAGENT_INSTRUCTIONS) assert.equal(bothMigrated.includes(legacy), false);
+  assert.equal(bothMigrated.split(RIN_SUBAGENT_INSTRUCTIONS).length - 1, 1);
 });
 
 test('setup CLI reports the non-interactive preflight failure once', async () => {

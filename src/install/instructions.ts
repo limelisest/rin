@@ -2,8 +2,9 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {exists} from './core.js';
 
-export const RIN_SUBAGENT_INSTRUCTIONS = 'Actively use a separate subagent for each independent subtask. For example, use Astra subagents for work that can run in parallel, and Luna subagents for simple tasks.';
+export const RIN_SUBAGENT_INSTRUCTIONS = 'As the primary agent, handle only planning and acceptance review. Delegate every execution task to a separate Terra subagent for complex work or Luna subagent for simple work.';
 export const RIN_LEGACY_SUBAGENT_INSTRUCTIONS = Object.freeze([
+  'Actively use a separate subagent for each independent subtask. For example, use Astra subagents for work that can run in parallel, and Luna subagents for simple tasks.',
   'Make active use of subagents: use Astra for work that can run in parallel, Terra for relatively independent, simple tasks, and Luna for purely execution-oriented tasks.',
 ]);
 

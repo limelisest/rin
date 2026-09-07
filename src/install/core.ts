@@ -1,4 +1,4 @@
-import {errorCode} from './types.js';
+import {errorCode,errorMessage} from './types.js';
 import type {Candidate,Exec,ExecOptions,ExecResult,Executable,InstallState,ManagedService} from './types.js';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile, rename, rm, access, realpath } from 'node:fs/promises';
@@ -136,7 +136,14 @@ export async function switchRelease(home: string, candidate: Pick<Candidate,'sha
       await atomicJSON(join(home, 'install.json'), state);
       if (running) {
         try { await service.stop(); await service.start(); }
-        catch (rollback) { throw new AggregateError([error, rollback], 'Update failed; previous release restored but service recovery failed'); }
+        catch (rollback) {
+          throw new AggregateError(
+            [error, rollback],
+            `Update failed; previous release restored but service recovery failed.\n`+
+            `New release service error: ${errorMessage(error)}\n`+
+            `Previous release service recovery error: ${errorMessage(rollback)}`,
+          );
+        }
       }
     }
     throw error;

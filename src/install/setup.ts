@@ -14,7 +14,7 @@ import {ensureNerveMcp} from './nerve.js';
 import {activateNerveMcp} from './nerve-service.js';
 export { inspectLegacy, disableLegacy } from './legacy.js';
 export {collectChoices} from './setup-ui.js';
-export {appendAgentsInstructions,RIN_SUBAGENT_INSTRUCTIONS} from './instructions.js';
+export {appendAgentsInstructions} from './instructions.js';
 
 const quoteSh = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 export async function ensureCommandPath(binDir: string, { userHome = homedir(), platform = process.platform, env = process.env, exec = run } = {}) {

@@ -5,8 +5,8 @@ import {spawn} from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join,resolve } from 'node:path';
 import {pathToFileURL} from 'node:url';
-import { appendAgentsInstructions, RIN_SUBAGENT_INSTRUCTIONS, collectChoices, inspectLegacy, disableLegacy, ensureCommandPath, writeLaunchers } from '../dist/install/setup.js';
-import {migrateAgentsInstructions,RIN_LEGACY_SUBAGENT_INSTRUCTIONS} from '../dist/install/instructions.js';
+import { appendAgentsInstructions, collectChoices, inspectLegacy, disableLegacy, ensureCommandPath, writeLaunchers } from '../dist/install/setup.js';
+import {migrateAgentsInstructions} from '../dist/install/instructions.js';
 
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'rin-setup-'));
@@ -38,10 +38,11 @@ function uiFixture(answers) {
 }
 
 test('Clack setup collects independent product choices and preserves existing AGENTS by default', async () => {
-  const ui = uiFixture([['codex', 'chatgpt'], true, false, false, true]);
+  const ui = uiFixture([['codex', 'chatgpt'], true, false, true]);
   const choices = await collectChoices({hasAgents: true, ui});
-  assert.deepEqual(choices, {products: ['codex', 'chatgpt'], recommendations: true, agents: '', subagentGuidance: false});
+  assert.deepEqual(choices, {products: ['codex', 'chatgpt'], recommendations: true, agents: ''});
   const notes = ui.events.filter(([kind]) => kind === 'note').map(([, , body]) => body).join('\n');
+  assert.doesNotMatch(JSON.stringify(ui.events), /subagent/i);
   assert.match(notes, /full filesystem access/);
   assert.match(notes, /approval_policy=never/);
   assert.doesNotMatch(notes, /120,000 tokens|model_auto_compact_token_limit/);
@@ -55,7 +56,7 @@ test('legacy decline and explicit final decline return null without an installat
   assert.equal(await collectChoices({legacy: {}, ui: legacyUI}), null);
   assert.equal(legacyUI.events.filter(([kind]) => kind === 'multiselect').length, 0);
 
-  const finalUI = uiFixture([[], false, 'skip', false, false]);
+  const finalUI = uiFixture([[], false, 'skip', false]);
   assert.equal(await collectChoices({ui: finalUI}), null);
   assert.match(finalUI.events.at(-1)[1], /Finished without installing Rin/);
 });
@@ -68,7 +69,7 @@ test('a Clack cancellation is reported with INSTALL_CANCELLED', async () => {
 });
 
 test('empty product selection is accepted and manual instructions preserve existing AGENTS text', async t => {
-  const ui = uiFixture([[], false, 'text', 'Use short answers.', false, true]);
+  const ui = uiFixture([[], false, 'text', 'Use short answers.', true]);
   const choices = await collectChoices({ui});
   assert.deepEqual(choices.products, []);
   const file = join(await temporary(t), 'AGENTS.md');
@@ -78,7 +79,7 @@ test('empty product selection is accepted and manual instructions preserve exist
 });
 
 test('blank manual instructions use an empty Clack default instead of prompt placeholder text', async () => {
-  const ui = uiFixture([[], false, 'text', '', false, true]);
+  const ui = uiFixture([[], false, 'text', '', true]);
   const choices = await collectChoices({ui});
   assert.equal(choices.agents, '');
   const [, options] = ui.events.find(([kind]) => kind === 'text');
@@ -90,7 +91,7 @@ test('file instructions retry after an unreadable path and preserve existing AGE
   const dir = await temporary(t), source = join(dir, 'instructions.md'), agents = join(dir, 'AGENTS.md');
   await writeFile(source, 'Prefer concrete examples.\n');
   await writeFile(agents, 'Existing instructions.\n');
-  const ui = uiFixture([[], false, 'file', join(dir, 'missing.md'), source, false, true]);
+  const ui = uiFixture([[], false, 'file', join(dir, 'missing.md'), source, true]);
   const choices = await collectChoices({ui});
   assert.equal(choices.agents, 'Prefer concrete examples.\n');
   assert.equal(ui.events.filter(([kind]) => kind === 'error').length, 1);
@@ -141,51 +142,50 @@ test('launcher publication never replaces an unrelated executable', async t => {
   assert.equal(await readFile(join(binDir, name), 'utf8'), 'unrelated');
 });
 
-test('AGENTS append preserves existing bytes, orders guidance last and avoids exact duplicates', async t => {
-  const dir = await temporary(t), file = join(dir, 'AGENTS.md');
+test('AGENTS append only adds personal text, even if an older caller supplies the retired flag', async t => {
+  const file = join(await temporary(t), 'AGENTS.md');
   const original = 'Keep these spaces  \n\n';
   await writeFile(file, original);
   assert.equal(await appendAgentsInstructions(file), false);
-  assert.equal(await readFile(file, 'utf8'), original);
   await appendAgentsInstructions(file, {agents: 'My added instructions', subagentGuidance: true});
-  const once = await readFile(file, 'utf8');
-  assert.ok(once.startsWith(original));
-  assert.ok(once.indexOf('My added instructions') < once.indexOf(RIN_SUBAGENT_INSTRUCTIONS));
-  assert.ok(once.endsWith(RIN_SUBAGENT_INSTRUCTIONS + '\n'));
+  assert.equal(await readFile(file, 'utf8'), original + '\nMy added instructions\n');
   assert.equal(await appendAgentsInstructions(file, {subagentGuidance: true}), false);
-  assert.equal(await readFile(file, 'utf8'), once);
 });
 
-test('declining all AGENTS additions creates no file; guidance alone can create one', async t => {
+test('skipped personal instructions create no file or automatic guidance', async t => {
   const file = join(await temporary(t), 'nested', 'AGENTS.md');
-  assert.equal(await appendAgentsInstructions(file), false);
+  assert.equal(await appendAgentsInstructions(file, {subagentGuidance: true}), false);
   await assert.rejects(readFile(file), {code: 'ENOENT'});
-  assert.equal(await appendAgentsInstructions(file, {subagentGuidance: true}), true);
-  assert.equal(await readFile(file, 'utf8'), RIN_SUBAGENT_INSTRUCTIONS + '\n');
 });
 
-test('update migrates only exact Rin-managed subagent guidance and avoids duplicates', async t => {
+const retired = JSON.parse(await readFile(new URL('./fixtures/install/retired-subagent-guidance.json', import.meta.url), 'utf8'));
+test('update removes every published guidance generation with LF, CRLF, BOM, and reflow', async t => {
+  for (const fixture of retired) for (const eol of ['\n', '\r\n']) for (const reflow of [false, true]) {
+    const file = join(await temporary(t), 'AGENTS.md');
+    const guidance = reflow ? fixture.text.split(/\s+/).join(eol + '  ') : fixture.text.replaceAll('\n', eol);
+    const before = '\uFEFF# Personal instructions' + eol + 'Keep my voice.  ' + eol + eol;
+    const after = eol + 'My own subagent policy stays.' + eol;
+    await writeFile(file, before + guidance + after);
+    assert.equal(await migrateAgentsInstructions(file), true, fixture.revision);
+    assert.equal(await readFile(file, 'utf8'), before + after, fixture.revision);
+    assert.equal(await migrateAgentsInstructions(file), false);
+  }
+});
+
+test('update removes mixed duplicates but preserves custom and quoted instructions', async t => {
   const file = join(await temporary(t), 'AGENTS.md');
-  const persona = '# Personal instructions\nKeep my original voice.\n\n';
-  await writeFile(file, persona + RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0] + '\n');
+  const personal = 'Use subagents only when I ask.\n' + retired.map(x => '> ' + x.text.replaceAll('\n', '\n> ')).join('\n') + '\n';
+  const managed = [...retired, ...retired].map(x => x.text).join('\n');
+  await writeFile(file, personal + managed + '\n');
   assert.equal(await migrateAgentsInstructions(file), true);
-  assert.equal(await readFile(file, 'utf8'), persona + RIN_SUBAGENT_INSTRUCTIONS + '\n');
+  assert.equal(await readFile(file, 'utf8'), personal + '\n'.repeat(retired.length * 2));
   assert.equal(await migrateAgentsInstructions(file), false);
-
-  await writeFile(file, `${persona}${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n${RIN_SUBAGENT_INSTRUCTIONS}\n`);
-  assert.equal(await migrateAgentsInstructions(file), true);
-  const migrated = await readFile(file, 'utf8');
-  assert.ok(migrated.startsWith(persona));
-  assert.equal(migrated.includes(RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]), false);
-  assert.equal(migrated.split(RIN_SUBAGENT_INSTRUCTIONS).length - 1, 1);
-
-  const bothLegacyFile = join(await temporary(t), 'AGENTS.md');
-  await writeFile(bothLegacyFile, `${persona}${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[1]}\n`);
-  assert.equal(await migrateAgentsInstructions(bothLegacyFile), true);
-  const bothMigrated = await readFile(bothLegacyFile, 'utf8');
-  assert.ok(bothMigrated.startsWith(persona));
-  for (const legacy of RIN_LEGACY_SUBAGENT_INSTRUCTIONS) assert.equal(bothMigrated.includes(legacy), false);
-  assert.equal(bothMigrated.split(RIN_SUBAGENT_INSTRUCTIONS).length - 1, 1);
+  const custom = retired.at(-1).text.replace('every execution task', 'only approved execution tasks');
+  const inline = 'An example: ' + retired.at(-1).text;
+  await writeFile(file, custom + '\n' + inline);
+  assert.equal(await migrateAgentsInstructions(file), false);
+  assert.equal(await readFile(file, 'utf8'), custom + '\n' + inline);
+  assert.equal(await migrateAgentsInstructions(join(await temporary(t), 'absent.md')), false);
 });
 
 test('setup CLI reports the non-interactive preflight failure once', async () => {

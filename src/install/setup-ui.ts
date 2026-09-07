@@ -1,10 +1,9 @@
 import type {LegacyInstallation} from './legacy.js';
 type UI = typeof clack;
-export interface Choices {products: string[]; recommendations: boolean; agents: string; subagentGuidance: boolean}
+export interface Choices {products: string[]; recommendations: boolean; agents: string}
 import * as clack from '@clack/prompts';
 import {readFile,stat} from 'node:fs/promises';
 import {resolve} from 'node:path';
-import {RIN_SUBAGENT_INSTRUCTIONS} from './instructions.js';
 
 export const setupUI = clack;
 
@@ -69,20 +68,17 @@ export async function collectChoices({hasAgents = false, legacy = null, home, ag
   if (!recommendations) ui.log.info('Existing Codex settings will be preserved.');
   let agents = '';
   if (!hasAgents || await confirmChoice('Global AGENTS.md already exists. Append personal instructions?',false,ui)) agents = await promptInstructions(ui);
-  note(ui,RIN_SUBAGENT_INSTRUCTIONS,'Optional subagent guidance');
-  const subagentGuidance = await confirmChoice('Append Rin subagent guidance after your instructions?',false,ui);
   note(ui,[
     home ? `Install location: ${home}` : 'Install for the current user.',
     `Products: ${products.length ? products.join(', ') : 'use existing products'}`,
     `Recommended profile: ${recommendations ? 'apply, including full access and approval_policy=never' : 'preserve current settings'}`,
     `Personal instructions: ${agents ? 'append supplied text' : 'preserve current text'}`,
-    `Subagent guidance: ${subagentGuidance ? 'append if not already present' : 'skip'}`,
     agentsPath ? `Instructions file: ${agentsPath}` : '',
     'Original-session search: included (FFF MCP)',
     'Nerve MCP: included; initialize and start a local service with no event targets or chat accounts',
   ].filter(Boolean).join('\n'),'Installation plan');
   if (!await confirmChoice('Install Rin with these choices?',true,ui)) { ui.outro('Finished without installing Rin.'); return null; }
-  return {products,recommendations,agents,subagentGuidance};
+  return {products,recommendations,agents};
 }
 
 export async function runSetupProgress<T>(message: string, action: ()=>Promise<T>, {ui = clack, tty = process.stderr.isTTY} = {}) {

@@ -4,25 +4,25 @@ import {execFileSync} from 'node:child_process';
 import {cp,mkdtemp,mkdir,readFile,realpath,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {RIN_LEGACY_SUBAGENT_INSTRUCTIONS,RIN_SUBAGENT_INSTRUCTIONS} from '../dist/install/instructions.js';
+const retired = JSON.parse(await readFile(new URL('./fixtures/install/retired-subagent-guidance.json', import.meta.url), 'utf8')).map(x=>x.text);
 import {runUpdateMigrations,migrationHome} from '../dist/install/migrations.js';
 import {pathToFileURL} from 'node:url';
 import {main} from '../dist/cli.js';
 
-test('ordinary update migrates both older managed guidance generations without applying the recommended profile',async t=>{
+test('ordinary update removes all historical managed guidance generations without applying the recommended profile',async t=>{
   const codexHome=await mkdtemp(join(tmpdir(),'rin-update-migrations-'));
   t.after(()=>rm(codexHome,{recursive:true,force:true}));
-  await writeFile(join(codexHome,'AGENTS.md'),`Personal preface.\n\n${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[0]}\n${RIN_LEGACY_SUBAGENT_INSTRUCTIONS[1]}\n`);
+  await writeFile(join(codexHome,'AGENTS.md'),`Personal preface.\n\n${retired.join('\n')}\n`);
   await writeFile(join(codexHome,'config.toml'),'model_auto_compact_token_limit = 120000\n');
   let request;
   const result=await runUpdateMigrations({home:null,codexHome,writeConfig:async value=>{request=value;return{ok:true};}});
   assert.deepEqual(result,{agentsChanged:true,obsoleteConfigRemoved:true,contextManagementMigrated:false});
-  assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),`Personal preface.\n\n${RIN_SUBAGENT_INSTRUCTIONS}\n\n`);
+  assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),'Personal preface.\n\n' + '\n'.repeat(retired.length));
   assert.deepEqual(request.edits,[{keyPath:'model_auto_compact_token_limit',value:null,mergeStrategy:'upsert'}]);
 });
 
-test('rin update runs migrations for either legacy guidance generation when the release is already current',async t=>{
-  for (const legacy of RIN_LEGACY_SUBAGENT_INSTRUCTIONS) {
+test('rin update removes every historical guidance generation when the release is already current',async t=>{
+  for (const legacy of retired) {
   const root=await mkdtemp(join(tmpdir(),'rin-update-current-'));
   // Git may finish detached maintenance after update returns. Retry transient
   // ENOTEMPTY during fixture removal without weakening the migration checks.
@@ -48,7 +48,7 @@ test('rin update runs migrations for either legacy guidance generation when the 
     }),0);
   } finally { console.log=originalLog; }
   assert.deepEqual(output,['Rin is already up to date.']);
-  assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),`${RIN_SUBAGENT_INSTRUCTIONS}\n`);
+  assert.equal(await readFile(join(codexHome,'AGENTS.md'),'utf8'),'\n');
   assert.deepEqual(request.edits,[{keyPath:'model_auto_compact_token_limit',value:null,mergeStrategy:'upsert'}]);
   }
 });

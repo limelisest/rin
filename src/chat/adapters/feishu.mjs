@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { admitted } from '../policy.mjs';
+import { admitted, requiresMention } from '../policy.mjs';
 import { COMMANDS, parseCommand } from '../commands.mjs';
 
 const capabilities = Object.freeze({ edit: true, delete: true, typing: false, maxText: 30000 });
@@ -93,7 +93,7 @@ export function createAdapter(config, context) {
           const command = Boolean(parseCommand(commandText,commands));
           // Admission deliberately precedes authenticated resource downloads.
           if (!admitted({...config,type:'feishu'},userId,kind,{command})) return;
-          if (kind === 'group' && config.requireMention !== false && !mentioned) return;
+          if (kind === 'group' && requiresMention(config,{command}) && !mentioned) return;
           const envelope = {
             id: String(message.message_id), chatId: String(message.chat_id), userId, kind,
             mentioned,

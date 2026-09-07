@@ -122,6 +122,20 @@ test('OneBot admits only recognized group commands through dmOnly', async () => 
   await adapter.stop();
 });
 
+test('OneBot can admit registered group commands without exposing ordinary unmentioned text', async () => {
+  const ctx=await context();ctx.commands=[{name:'ping',description:'Check latency'}];
+  const adapter=createOneBot({id:'ob-command-no-mention',wsUrl:'ws://onebot',allowUsers:['42'],dmOnly:false,requireMention:true,commandsRequireMention:false,WebSocket:FakeWebSocket},ctx);
+  const incoming=[];
+  await adapter.start(async event=>incoming.push(event));
+  for(const event of [
+    {user_id:42,message_id:4,message:'/ping'},
+    {user_id:42,message_id:5,message:'ordinary text'},
+  ]) FakeWebSocket.instance.emit('message',JSON.stringify({post_type:'message',message_type:'group',group_id:8,...event}));
+  await new Promise(setImmediate);
+  assert.deepEqual(incoming.map(event=>event.id),['4']);
+  await adapter.stop();
+});
+
 class FakeDispatcher {
   register(map) { this.map = map; FakeDispatcher.instance = this; return this; }
 }

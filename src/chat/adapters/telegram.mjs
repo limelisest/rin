@@ -2,7 +2,7 @@ import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {telegramHtmlToPlainText} from '../presentation.mjs';
-import {admitted} from '../policy.mjs';
+import {admitted,requiresMention} from '../policy.mjs';
 import {COMMANDS,parseCommand,registerCommands} from '../commands.mjs';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -53,7 +53,7 @@ export function normalizeTelegramUpdate(update, config, bot = {}, commands = COM
   }
   const recognizedCommand = Boolean(parseCommand(text,commands));
   if (!userId || !admitted({...config,type:'telegram'},userId,kind,{command:recognizedCommand})) return null;
-  if (kind === 'group' && (config.requireMention ?? true) && !mentioned) return null;
+  if (kind === 'group' && requiresMention(config,{command:recognizedCommand}) && !mentioned) return null;
   return {id: String(message.message_id), chatId: String(message.chat.id), userId, kind, mentioned,
     text: text.trim(), replyTo: message.reply_to_message?.message_id ? String(message.reply_to_message.message_id) : undefined,
     descriptor: fileDescriptor(message)};

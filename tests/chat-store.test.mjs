@@ -33,6 +33,7 @@ test('DM-only rejects owner guild mentions and no wildcard is treated as authori
   assert.equal(allowed(a,m),false); assert.equal(allowed(a,{...m,kind:'dm'}),true);
   assert.equal(allowed({...a,allowUsers:['*']},{...m,kind:'dm'}),false);
   assert.throws(() => validateConfig({adapters:[{id:'d',type:'discord',allowUsers:['owner']}],bindings:[{adapter:'d',chatId:'2',threadId:'t',kind:'group'}]}),/DM-only/);
+  assert.throws(() => validateConfig({adapters:[{id:'d',type:'discord',allowUsers:['owner'],commandsRequireMention:'no'}],bindings:[]}),/commandsRequireMention/);
 });
 test('a Codex thread binds one chat only and every binding explicitly mirrors', () => {
   const adapters=[{id:'d',type:'discord',allowUsers:['owner']},{id:'t',type:'telegram',allowUsers:['owner']}];

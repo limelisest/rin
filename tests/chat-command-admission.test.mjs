@@ -10,6 +10,8 @@ test('all adapters admit registered group commands by identity while preserving 
     assert.equal(allowed(config,message),false,type);
     assert.equal(allowed(config,{...message,userId:'stranger'},{command:true}),false,type);
     assert.equal(allowed(config,{...message,mentioned:false},{command:true}),false,type);
+    assert.equal(allowed({...config,commandsRequireMention:false},{...message,mentioned:false},{command:true}),true,type);
+    assert.equal(allowed({...config,commandsRequireMention:false},{...message,mentioned:false}),false,type);
     assert.equal(allowed(config,{...message,chatId:'another-group'},{command:true}),true,type);
   }
 });

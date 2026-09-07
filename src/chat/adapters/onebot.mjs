@@ -1,7 +1,7 @@
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { admitted } from '../policy.mjs';
+import { admitted, requiresMention } from '../policy.mjs';
 import { COMMANDS, parseCommand } from '../commands.mjs';
 
 const capabilities = Object.freeze({ edit: false, delete: true, typing: false, maxText: 4000 });
@@ -87,10 +87,11 @@ export function createAdapter(config, context) {
     const userId = String(event.user_id);
     const parts = segments(event.message);
     const text = parts.filter((part) => part.type === 'text').map((part) => part.data?.text || '').join('').trim();
+    const command = Boolean(parseCommand(text,commands));
     // Admission deliberately precedes URL downloads and get_file calls.
-    if (!admitted({...config,type:'onebot'},userId,kind,{command:Boolean(parseCommand(text,commands))})) return;
+    if (!admitted({...config,type:'onebot'},userId,kind,{command})) return;
     const mentioned = parts.some((part) => part.type === 'at' && String(part.data?.qq) === String(event.self_id));
-    if (kind === 'group' && config.requireMention !== false && !mentioned) return;
+    if (kind === 'group' && requiresMention(config,{command}) && !mentioned) return;
     const reply = parts.find((part) => part.type === 'reply')?.data?.id;
     const envelope = {
       id: String(event.message_id), chatId: String(kind === 'group' ? event.group_id : event.user_id), userId, kind,

@@ -8,6 +8,7 @@ export function validateConfig(config) {
     if (!adapterTypes.includes(a.type)) throw new Error(`Unsupported adapter type: ${a.type}`);
     if (!Array.isArray(a.allowUsers) || a.allowUsers.some(x => typeof x !== 'string')) throw new Error(`allowUsers must be an array of user IDs: ${a.id}`);
     if (a.enabled !== false && a.allowUsers.length === 0) throw new Error(`Enabled adapter requires an explicit allowUsers list: ${a.id}`);
+    if (a.commandsRequireMention !== undefined && typeof a.commandsRequireMention !== 'boolean') throw new Error(`commandsRequireMention must be a boolean: ${a.id}`);
     ids.add(a.id);
   }
   const routes = new Set();
@@ -34,9 +35,13 @@ export function admitted(adapter, userId, kind, {command=false} = {}) {
   return command || !(adapter.dmOnly ?? adapter.type === 'discord') || kind === 'dm';
 }
 
+export function requiresMention(adapter, {command=false} = {}) {
+  return adapter.requireMention !== false && !(command && adapter.commandsRequireMention === false);
+}
+
 export function allowed(adapter, message, options = {}) {
   if (!admitted(adapter, message.userId, message.kind, options)) return false;
-  if (message.kind === 'group' && adapter.requireMention !== false && !message.mentioned) return false;
+  if (message.kind === 'group' && requiresMention(adapter, options) && !message.mentioned) return false;
   return Boolean(message.id && message.chatId && (message.text || message.files?.length));
 }
 

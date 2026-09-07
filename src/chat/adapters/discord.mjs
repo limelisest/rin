@@ -1,4 +1,4 @@
-import {admitted} from '../policy.mjs';
+import {admitted,requiresMention} from '../policy.mjs';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {basename, extname, join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -69,10 +69,11 @@ export function normalizeDiscordMessage(message, config, selfId = '', commands =
   const kind = message.guildId ? 'group' : 'dm';
   const mentionTokens = selfId ? [`<@${selfId}>`, `<@!${selfId}>`] : [];
   const mentioned = kind === 'dm' || Boolean(message.mentions?.users?.has?.(String(selfId)));
-  if (kind === 'group' && (config.requireMention ?? true) && !mentioned) return null;
   let text = String(message.content || '').trim();
   if (mentioned && kind === 'group') for (const token of mentionTokens) text = text.split(token).join('').trim();
-  if (!userId || !admitted({...config,type:'discord'},userId,kind,{command:Boolean(parseCommand(text,commands))}))return null;
+  const command=Boolean(parseCommand(text,commands));
+  if (!userId || !admitted({...config,type:'discord'},userId,kind,{command}))return null;
+  if (kind === 'group' && requiresMention(config,{command}) && !mentioned) return null;
   return {id: String(message.id), chatId: String(message.channelId), userId, kind, mentioned, text,
     replyTo: message.reference?.messageId ? String(message.reference.messageId) : undefined};
 }
